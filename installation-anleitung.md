@@ -18,8 +18,10 @@ Willkommen! Diese Anleitung führt dich Schritt für Schritt durch die Installat
 
 1. Öffne deinen Browser, in dem Tampermonkey installiert ist.  
 2. Navigiere zu:  
-   `https://raw.githubusercontent.com/…/tribal-wars-market-bot.user.js`  
-   *(URL an dein Repository anpassen)*  
+   ```
+   https://raw.githubusercontent.com/Themegaindex/Die-St-mme-Marktplatz-testscript/main/tribal-wars-market-bot.user.js
+   ```  
+   *(Diese URL ist „Raw → Download“ – Tampermonkey erkennt sie automatisch.)*  
 3. Tampermonkey zeigt eine Vorschau an. Klicke **Installieren**.  
 4. Lade eine Tribal-Wars-Seite neu. Unten rechts sollte nun ein kleines 💰-Panel erscheinen.
 
@@ -35,12 +37,26 @@ Erweitert den Bot um:
 
 **Installation**
 
-1. Lade `tribal-wars-market-extensions.js` herunter.  
+**Variante A – GitHub-Raw (empfohlen)**
+
+1. Kopiere die folgende Zeile:  
+   ```
+   // @require https://raw.githubusercontent.com/Themegaindex/Die-St-mme-Marktplatz-testscript/main/tribal-wars-market-extensions.js
+   ```
 2. Öffne dein Bot-Script in Tampermonkey → **Bearbeiten**.  
-3. Füge oberhalb von `// ==/UserScript==` ein:  
-   `// @require file://C:/Pfad/tribal-wars-market-extensions.js`  
-   *(Pfad anpassen)*  
-4. Speichern, Seite neu laden – Log zeigt „Extensions loaded“.
+3. Füge die Zeile **unter** den anderen `@match`-Zeilen, aber **oberhalb** von `// ==/UserScript==` ein.  
+4. **Speichern** (STRG + S) → Seite neu laden – im Log erscheint *“Extensions loaded”*.
+
+**Variante B – Lokale Datei**
+
+1. Lade die Datei über die GitHub-Schaltfläche **Download raw file** herunter.  
+2. Speichere sie z. B. unter `C:\Users\<NAME>\Scripts\tribal-wars-market-extensions.js`.  
+3. Füge in deinem Bot-Script ein:  
+   ```
+   // @require file://C:/Users/<NAME>/Scripts/tribal-wars-market-extensions.js
+   ```  
+   *(Pfad an dein System anpassen)*  
+4. Speichern und Seite neu laden.
 
 ---
 
