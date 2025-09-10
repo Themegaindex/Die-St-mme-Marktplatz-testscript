@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Tribal Wars Market Bot
+// @name         Tribal Wars Market Bot (Fixed)
 // @namespace    https://github.com/Themegaindex/Die-St-mme-Marktplatz-testscript
-// @version      1.0.0
-// @description  Intelligente Marktplatz-Automatisierung für Tribal Wars mit minimalen Anfragen
+// @version      1.1.0
+// @description  Intelligente Marktplatz-Automatisierung für Tribal Wars mit stabiler UI, korrektem Preis-Parsing und robusten Buttons/Log
 // @author       Themegaindex
 // @match        *://*.die-staemme.de/*
 // @match        *://*.tribalwars.net/*
@@ -22,6 +22,11 @@
 // @match        *://*.plemena.net/*
 // @match        *://*.tribalwars.ae/*
 // @match        *://*.tribalwars.works/*
+// -------------------------------------------------------------------------
+//  OPTIONALE ERWEITERUNG (falls NICHT als eigenes Userscript installiert):
+//  Achtung: nur aktivieren, wenn du die Erweiterung unten NICHT separat einfügst!
+// @require      https://raw.githubusercontent.com/Themegaindex/Die-St-mme-Marktplatz-testscript/main/tribal-wars-market-extensions.js
+// -------------------------------------------------------------------------
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
@@ -32,108 +37,75 @@
 // @run-at       document-idle
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     // -------------------------------------------------------------------------
     // KONFIGURATION
     // -------------------------------------------------------------------------
     const CONFIG = {
-        // Allgemeine Einstellungen
-        enabled: true,                 // Bot aktiviert
-        debugMode: false,              // Debug-Modus (mehr Logs)
-        
-        // Anti-Detection Einstellungen
-        minActionDelay: 1500,          // Minimale Verzögerung zwischen Aktionen (ms)
-        maxActionDelay: 4500,          // Maximale Verzögerung zwischen Aktionen (ms)
-        minSessionPause: 15,           // Minimale Pause zwischen Sessions (Minuten)
-        maxSessionPause: 45,           // Maximale Pause zwischen Sessions (Minuten)
-        maxActionsPerSession: 12,      // Maximale Aktionen pro Session
-        humanPatterns: true,           // Menschliche Verhaltensmuster simulieren
-        
-        // Marktplatz Einstellungen
-        minProfitPercentage: 15,       // Minimaler Gewinn in Prozent für Handel
-        maxResourceStock: 25000,       // Maximaler Ressourcenbestand pro Typ
-        minResourceStock: 5000,        // Minimaler Ressourcenbestand pro Typ
-        balanceResources: true,        // Ressourcen ausbalancieren
-        
-        // Ressourcen Prioritäten (1-10, höher = wichtiger)
-        resourcePriority: {
-            wood: 5,
-            stone: 5,
-            iron: 5
-        },
-        
-        // Dorf-spezifische Einstellungen
-        villageSettings: {}            // Wird dynamisch gefüllt
+        enabled: true,
+        debugMode: false,
+
+        // Anti-Detection
+        minActionDelay: 1500,
+        maxActionDelay: 4500,
+        minSessionPause: 15, // Minuten
+        maxSessionPause: 45, // Minuten
+        maxActionsPerSession: 12,
+        humanPatterns: true,
+
+        // Markt
+        minProfitPercentage: 15,
+        maxResourceStock: 25000,
+        minResourceStock: 5000,
+        balanceResources: true,
+
+        // Prioritäten
+        resourcePriority: { wood: 5, stone: 5, iron: 5 },
+
+        villageSettings: {}
     };
 
     // -------------------------------------------------------------------------
-    // DATENSTRUKTUREN
+    // DATEN-CACHES
     // -------------------------------------------------------------------------
-    
-    // Marktdaten Cache
     const marketCache = {
-        offers: [],                    // Aktuelle Marktangebote
-        lastUpdate: 0,                 // Zeitpunkt der letzten Aktualisierung
-        priceHistory: {                // Historische Preisdaten
-            wood: [],
-            stone: [],
-            iron: []
-        },
-        bestPrices: {                  // Beste aktuelle Preise
-            buy: {
-                wood: 0,
-                stone: 0,
-                iron: 0
-            },
-            sell: {
-                wood: 0,
-                stone: 0,
-                iron: 0
-            }
+        offers: [],
+        lastUpdate: 0,
+        priceHistory: { wood: [], stone: [], iron: [] },
+        bestPrices: {
+            buy: { wood: 0, stone: 0, iron: 0 },   // günstigster Kauf (kleinstes Verhältnis)
+            sell: { wood: 0, stone: 0, iron: 0 }   // bester Verkauf (höchstes Verhältnis)
         }
     };
-    
-    // Dorf-Daten Cache
+
     const villageCache = {
-        resources: {                   // Aktuelle Ressourcen
-            wood: 0,
-            stone: 0,
-            iron: 0
-        },
-        storage: 0,                    // Lagerkapazität
-        merchantsAvailable: 0,         // Verfügbare Händler
-        merchantsTotal: 0,             // Gesamtzahl Händler
-        lastUpdate: 0                  // Zeitpunkt der letzten Aktualisierung
+        resources: { wood: 0, stone: 0, iron: 0 },
+        storage: 0,
+        merchantsAvailable: 0,
+        merchantsTotal: 0,
+        merchantMaxTransport: 0,
+        lastUpdate: 0
     };
-    
-    // Statistik und Protokollierung
+
     const stats = {
-        tradesCompleted: 0,            // Abgeschlossene Handelsaktionen
-        resourcesTraded: {             // Gehandelte Ressourcen
-            wood: 0,
-            stone: 0,
-            iron: 0
-        },
-        profitGenerated: 0,            // Generierter Gewinn
-        lastAction: 0,                 // Zeitpunkt der letzten Aktion
-        sessionActions: 0,             // Aktionen in der aktuellen Session
-        errors: []                     // Aufgetretene Fehler
+        tradesCompleted: 0,
+        resourcesTraded: { wood: 0, stone: 0, iron: 0 },
+        profitGenerated: 0,
+        lastAction: 0,
+        sessionActions: 0,
+        errors: []
     };
-    
-    // -------------------------------------------------------------------------
-    // ERWEITERUNGS-BRIDGE (optional)
-    // -------------------------------------------------------------------------
-    /*  Wenn das separate Extension-Script in die Seite geladen wurde (z. B. durch
-        Verkettung beider Dateien in einem Userscript oder manuelles Einfügen),
-        liegen sämtliche erweiterten Funktionen unter window.twMarketExtensions.
-        Diese Bridge stellt sie bequem unter EXT bereit und prüft auf Existenz,
-        sodass das Haupt-Script auch allein funktionsfähig bleibt.              */
 
-    const EXT = (typeof window !== 'undefined' && window.twMarketExtensions) ? window.twMarketExtensions : {};
+    // -------------------------------------------------------------------------
+    // ERWEITERUNGS-BRIDGE (immer dynamisch lesen – egal in welcher Lade-Reihenfolge)
+    // -------------------------------------------------------------------------
+    function getEXT() {
+        return (typeof window !== 'undefined' && window.twMarketExtensions) ? window.twMarketExtensions : {};
+    }
 
-    // Fallback-Implementierung von randomWait, falls EXT kein randomWait hat
+    // Fallback-Wartefunktion (falls EXT.randomWait nicht vorhanden)
     async function randomWait(min, max) {
         const delay = randomDelay(min, max);
         return new Promise(resolve => setTimeout(resolve, delay));
@@ -142,132 +114,71 @@
     // -------------------------------------------------------------------------
     // HILFSFUNKTIONEN
     // -------------------------------------------------------------------------
-    
-    /**
-     * Generiert eine zufällige Verzögerung zwischen min und max
-     * @param {number} min - Minimale Verzögerung in ms
-     * @param {number} max - Maximale Verzögerung in ms
-     * @returns {number} - Zufällige Verzögerung in ms
-     */
     function randomDelay(min, max) {
-        // Fügt Varianz für natürlicheres Verhalten hinzu
         const variance = Math.random() * 0.3 + 0.85; // 0.85 - 1.15
         const base = Math.floor(Math.random() * (max - min + 1) + min);
         return Math.floor(base * variance);
     }
-    
-    /**
-     * Führt eine Aktion mit zufälliger Verzögerung aus
-     * @param {Function} action - Auszuführende Funktion
-     * @returns {Promise} - Promise, das nach der Ausführung aufgelöst wird
-     */
+
     function delayedAction(action) {
         return new Promise((resolve, reject) => {
             const delay = randomDelay(CONFIG.minActionDelay, CONFIG.maxActionDelay);
-            
-            // Human-like Verhalten: Manchmal längere Pausen
-            if (CONFIG.humanPatterns && Math.random() < 0.15) {
-                const extraDelay = randomDelay(2000, 8000);
-                log(`Zusätzliche Verzögerung: ${extraDelay}ms (menschliches Verhalten)`);
-                setTimeout(() => {
-                    try {
-                        const result = action();
-                        resolve(result);
-                    } catch (error) {
-                        logError("Fehler bei verzögerter Aktion", error);
-                        reject(error);
-                    }
-                }, delay + extraDelay);
-            } else {
-                setTimeout(() => {
-                    try {
-                        const result = action();
-                        resolve(result);
-                    } catch (error) {
-                        logError("Fehler bei verzögerter Aktion", error);
-                        reject(error);
-                    }
-                }, delay);
-            }
+            const extra = (CONFIG.humanPatterns && Math.random() < 0.15) ? randomDelay(2000, 8000) : 0;
+            setTimeout(() => {
+                try {
+                    const res = action();
+                    resolve(res);
+                } catch (e) {
+                    logError('Fehler bei verzögerter Aktion', e);
+                    reject(e);
+                }
+            }, delay + extra);
         });
     }
-    
-    /**
-     * Speichert Daten persistent
-     * @param {string} key - Schlüssel
-     * @param {any} value - Zu speichernder Wert
-     */
+
     function saveData(key, value) {
-        try {
-            GM_setValue(key, JSON.stringify(value));
-        } catch (error) {
-            logError("Fehler beim Speichern von Daten", error);
-        }
+        try { GM_setValue(key, JSON.stringify(value)); } catch (e) { logError('Fehler beim Speichern', e); }
     }
-    
-    /**
-     * Lädt gespeicherte Daten
-     * @param {string} key - Schlüssel
-     * @param {any} defaultValue - Standardwert, falls keine Daten vorhanden
-     * @returns {any} - Geladene Daten oder Standardwert
-     */
     function loadData(key, defaultValue) {
-        try {
-            const data = GM_getValue(key);
-            return data ? JSON.parse(data) : defaultValue;
-        } catch (error) {
-            logError("Fehler beim Laden von Daten", error);
-            return defaultValue;
-        }
+        try { const d = GM_getValue(key); return d ? JSON.parse(d) : defaultValue; } catch (e) { logError('Fehler beim Laden', e); return defaultValue; }
     }
-    
-    /**
-     * Protokolliert eine Nachricht, wenn Debug-Modus aktiviert ist
-     * @param {string} message - Zu protokollierende Nachricht
-     */
-    function log(message) {
-        if (CONFIG.debugMode) {
-            console.log(`[TW Market Bot] ${message}`);
-        }
+
+    function log(msg) {
+        if (CONFIG.debugMode) console.log(`[TW Market Bot] ${msg}`);
+        // Zusätzlich in UI-Log, wenn vorhanden
+        try { if (typeof window.twMarketBotLog === 'function') window.twMarketBotLog(msg); } catch {}
     }
-    
-    /**
-     * Protokolliert einen Fehler
-     * @param {string} message - Fehlermeldung
-     * @param {Error} error - Fehler-Objekt
-     */
     function logError(message, error) {
         console.error(`[TW Market Bot] ${message}:`, error);
-        stats.errors.push({
-            time: Date.now(),
-            message: message,
-            error: error.toString()
-        });
-        
-        // Begrenze die Anzahl der gespeicherten Fehler
-        if (stats.errors.length > 50) {
-            stats.errors = stats.errors.slice(-50);
-        }
-        
+        stats.errors.push({ time: Date.now(), message, error: String(error) });
+        if (stats.errors.length > 50) stats.errors = stats.errors.slice(-50);
         saveData('twMarketBotStats', stats);
+        try { if (typeof window.twMarketBotLogError === 'function') window.twMarketBotLogError(message, error); } catch {}
     }
-    
+
     // -------------------------------------------------------------------------
-    // MARKTPLATZ-FUNKTIONEN
+    // MARKTPLATZ: EXTRAKTION & PREISE
     // -------------------------------------------------------------------------
-    
-    /**
-     * Extrahiert Marktangebote von der aktuellen Seite
-     * @returns {Array} - Extrahierte Marktangebote
-     */
+    function isMarketPage() {
+        return window.location.href.includes('screen=market');
+    }
+
+    // KORRIGIERT: Angebotsseite sicher erkennen
+    function isMarketOfferPage() {
+        return isMarketPage() && (
+            window.location.href.includes('mode=other_offers') ||
+            document.querySelector('#market_offer_table')
+        );
+    }
+
+    // ROBUSTES Parsen von Angeboten (neue & alte Layouts)
     function extractMarketOffers() {
         const offers = [];
         try {
-            // Bevorzugt die echte Angebots-Tabelle
             const table = document.querySelector('#market_offer_table') ||
                           document.querySelector('table.vis:not(.modemenu)');
             if (!table) {
-                log("Keine Angebots-Tabelle gefunden");
+                log('Keine Angebots-Tabelle gefunden');
                 return offers;
             }
 
@@ -276,15 +187,15 @@
                 const cells = row.querySelectorAll('td');
                 if (!cells || cells.length < 5) return;
 
-                // Häufige Struktur (andere Angebote):
-                // [0]=icon sellRes, [1]=sellAmount, [2]=icon buyRes, [3]=buyAmount, [4]=Dorf, [5]=Zeit, [6]=Aktion
+                // typische Struktur (andere Angebote)
                 let sellIconCell = cells[0], sellAmountCell = cells[1],
-                    buyIconCell  = cells[2], buyAmountCell  = cells[3],
-                    metaCell     = cells[4], timeCell      = cells[5],
-                    actionCell   = cells[6] || cells[cells.length - 1];
+                    buyIconCell = cells[2], buyAmountCell = cells[3],
+                    metaCell = cells[4], timeCell = cells[5],
+                    actionCell = cells[6] || cells[cells.length - 1];
 
-                // Fallback auf ältere/abweichende Layouts
-                if (!sellIconCell.querySelector('.wood, .stone, .iron') && (cells.length >= 7)) {
+                // Fallback auf abweichende Layouts
+                const hasIcon = (c) => c && c.querySelector('.wood, .stone, .iron, .icon.header.wood, .icon.header.stone, .icon.header.iron');
+                if (!hasIcon(sellIconCell) && cells.length >= 7) {
                     sellIconCell = cells[0];
                     sellAmountCell = cells[1] || cells[0];
                     buyIconCell = cells[2] || cells[1];
@@ -294,7 +205,7 @@
                     actionCell = cells[6] || cells[cells.length - 1];
                 }
 
-                const resFromCell = (c) => {
+                const resFrom = (c) => {
                     if (!c) return '';
                     if (c.querySelector('.wood, .icon.header.wood')) return 'wood';
                     if (c.querySelector('.stone, .icon.header.stone')) return 'stone';
@@ -302,20 +213,17 @@
                     return '';
                 };
 
-                const sellResource = resFromCell(sellIconCell);
-                const buyResource  = resFromCell(buyIconCell);
+                const sellResource = resFrom(sellIconCell);
+                const buyResource = resFrom(buyIconCell);
                 const sellAmount = parseInt((sellAmountCell?.textContent || '').replace(/\D/g, ''), 10) || 0;
-                const buyAmount  = parseInt((buyAmountCell?.textContent  || '').replace(/\D/g, ''), 10) || 0;
-
+                const buyAmount = parseInt((buyAmountCell?.textContent || '').replace(/\D/g, ''), 10) || 0;
                 if (!sellResource || !buyResource || sellAmount <= 0 || buyAmount <= 0) return;
 
                 const offer = {
                     id: '',
-                    sellResource,
-                    sellAmount,
-                    buyResource,
-                    buyAmount,
-                    ratio: buyAmount / sellAmount,
+                    sellResource, sellAmount,
+                    buyResource, buyAmount,
+                    ratio: buyAmount / sellAmount, // Preis pro 1 Einheit sellResource
                     village: metaCell ? metaCell.textContent.trim() : '',
                     distance: 0,
                     travelTime: timeCell ? timeCell.textContent.trim() : '',
@@ -340,107 +248,22 @@
             });
 
             log(`${offers.length} Marktangebote extrahiert`);
-        } catch (error) {
-            logError("Fehler beim Extrahieren der Marktangebote", error);
+        } catch (e) {
+            logError('Fehler beim Extrahieren der Marktangebote', e);
         }
         return offers;
     }
-    
-    /**
-     * Extrahiert Ressourcen und Händlerinformationen aus der aktuellen Seite
-     */
-    function extractVillageInfo() {
-        try {
-            // Ressourcen extrahieren
-            const woodElement = document.getElementById('wood');
-            const stoneElement = document.getElementById('stone');
-            const ironElement = document.getElementById('iron');
-            const storageElement = document.getElementById('storage');
-            
-            if (woodElement) villageCache.resources.wood = parseInt(woodElement.textContent.trim().replace(/\D/g, '')) || 0;
-            if (stoneElement) villageCache.resources.stone = parseInt(stoneElement.textContent.trim().replace(/\D/g, '')) || 0;
-            if (ironElement) villageCache.resources.iron = parseInt(ironElement.textContent.trim().replace(/\D/g, '')) || 0;
-            if (storageElement) villageCache.storage = parseInt(storageElement.textContent.trim().replace(/\D/g, '')) || 0;
-            
-            // Händler extrahieren aus den span-Elementen
-            const merchantAvailable = document.getElementById('market_merchant_available_count');
-            const merchantTotal = document.getElementById('market_merchant_total_count');
-            const merchantMaxTransport = document.getElementById('market_merchant_max_transport');
-            
-            if (merchantAvailable) {
-                villageCache.merchantsAvailable = parseInt(merchantAvailable.textContent.trim()) || 0;
-            }
-            
-            if (merchantTotal) {
-                villageCache.merchantsTotal = parseInt(merchantTotal.textContent.trim()) || 0;
-            }
-            
-            if (merchantMaxTransport) {
-                villageCache.merchantMaxTransport = parseInt(merchantMaxTransport.textContent.trim()) || 0;
-            }
-            
-            // Fallback für ältere Versionen
-            if (!merchantAvailable || !merchantTotal) {
-                const merchantInfo = document.querySelector('#market_status_bar');
-                if (merchantInfo) {
-                    const merchantText = merchantInfo.textContent;
-                    const matches = merchantText.match(/(\d+)\/(\d+)/);
-                    if (matches && matches.length >= 3) {
-                        villageCache.merchantsAvailable = parseInt(matches[1]) || 0;
-                        villageCache.merchantsTotal = parseInt(matches[2]) || 0;
-                    }
-                }
-            }
-            
-            villageCache.lastUpdate = Date.now();
-            log("Dorf-Informationen aktualisiert");
-        } catch (error) {
-            logError("Fehler beim Extrahieren der Dorf-Informationen", error);
-        }
-    }
-    
-    /**
-     * Aktualisiert den Marktdaten-Cache
-     */
-    function updateMarketCache() {
-        try {
-            const currentOffers = extractMarketOffers();
-            if (currentOffers.length > 0) {
-                marketCache.offers = currentOffers;
-                marketCache.lastUpdate = Date.now();
-                
-                // Beste Preise berechnen
-                calculateBestPrices();
-                
-                // Preishistorie aktualisieren
-                updatePriceHistory();
-                
-                // Daten speichern
-                saveData('twMarketBotMarketCache', marketCache);
-                log("Marktdaten-Cache aktualisiert");
-            }
-        } catch (error) {
-            logError("Fehler beim Aktualisieren des Marktdaten-Cache", error);
-        }
-    }
-    
-    /**
-     * Berechnet die besten aktuellen Kauf- und Verkaufspreise
-     * sell[res] = bestes (höchstes) Verhältnis, wenn WIR diese Ressource verkaufen
-     * buy[res]  = günstigstes (kleinstes) Verhältnis, wenn WIR diese Ressource kaufen
-     */
+
+    // KORREKTE Preisberechnung: sell = Maximum, buy = Minimum
     function calculateBestPrices() {
         const bestSell = { wood: 0, stone: 0, iron: 0 };
-        const bestBuy  = { wood: Infinity, stone: Infinity, iron: Infinity };
+        const bestBuy = { wood: Infinity, stone: Infinity, iron: Infinity };
 
         marketCache.offers.forEach(o => {
             if (!o || !o.sellResource || !o.buyResource || o.sellAmount <= 0) return;
-            const ratio = o.buyAmount / o.sellAmount; // Preis pro 1 Einheit sellResource
+            const ratio = o.buyAmount / o.sellAmount;
 
-            // Verkaufen: wir verkaufen 'sellResource' – je höher ratio, desto besser
             if (ratio > bestSell[o.sellResource]) bestSell[o.sellResource] = ratio;
-
-            // Kaufen: wir kaufen 'sellResource' – je kleiner ratio, desto günstiger
             if (ratio < bestBuy[o.sellResource]) bestBuy[o.sellResource] = ratio;
         });
 
@@ -450,267 +273,154 @@
             stone: bestBuy.stone === Infinity ? 0 : bestBuy.stone,
             iron: bestBuy.iron === Infinity ? 0 : bestBuy.iron
         };
-        log("Beste Preise berechnet");
+        log('Beste Preise berechnet');
     }
-    
-    /**
-     * Aktualisiert die Preishistorie
-     */
+
     function updatePriceHistory() {
-        const timestamp = Date.now();
-        const maxHistoryLength = 100; // Maximale Anzahl an Datenpunkten
-        
-        // Füge aktuelle beste Preise zur Historie hinzu
-        if (marketCache.bestPrices.sell.wood > 0) {
-            marketCache.priceHistory.wood.push({
-                time: timestamp,
-                price: marketCache.bestPrices.sell.wood
-            });
-        }
-        
-        if (marketCache.bestPrices.sell.stone > 0) {
-            marketCache.priceHistory.stone.push({
-                time: timestamp,
-                price: marketCache.bestPrices.sell.stone
-            });
-        }
-        
-        if (marketCache.bestPrices.sell.iron > 0) {
-            marketCache.priceHistory.iron.push({
-                time: timestamp,
-                price: marketCache.bestPrices.sell.iron
-            });
-        }
-        
-        // Begrenze die Größe der Historie
-        if (marketCache.priceHistory.wood.length > maxHistoryLength) {
-            marketCache.priceHistory.wood = marketCache.priceHistory.wood.slice(-maxHistoryLength);
-        }
-        
-        if (marketCache.priceHistory.stone.length > maxHistoryLength) {
-            marketCache.priceHistory.stone = marketCache.priceHistory.stone.slice(-maxHistoryLength);
-        }
-        
-        if (marketCache.priceHistory.iron.length > maxHistoryLength) {
-            marketCache.priceHistory.iron = marketCache.priceHistory.iron.slice(-maxHistoryLength);
-        }
-        
-        log("Preishistorie aktualisiert");
+        const t = Date.now();
+        const maxLen = 100;
+
+        const pushIf = (res) => {
+            const p = marketCache.bestPrices.sell[res];
+            if (p > 0) marketCache.priceHistory[res].push({ time: t, price: p });
+            if (marketCache.priceHistory[res].length > maxLen)
+                marketCache.priceHistory[res] = marketCache.priceHistory[res].slice(-maxLen);
+        };
+        pushIf('wood'); pushIf('stone'); pushIf('iron');
+        log('Preishistorie aktualisiert');
     }
-    
-    /**
-     * Berechnet den Durchschnittspreis einer Ressource aus der Historie
-     * @param {string} resource - Ressourcentyp (wood, stone, iron)
-     * @param {number} days - Anzahl der Tage für die Berechnung
-     * @returns {number} - Durchschnittspreis
-     */
+
     function getAveragePriceFromHistory(resource, days = 1) {
-        const history = marketCache.priceHistory[resource];
-        if (!history || history.length === 0) return 0;
-        
+        const h = marketCache.priceHistory[resource];
+        if (!h || h.length === 0) return 0;
         const now = Date.now();
-        const timeThreshold = now - (days * 24 * 60 * 60 * 1000);
-        
-        const relevantPrices = history.filter(entry => entry.time >= timeThreshold);
-        if (relevantPrices.length === 0) return 0;
-        
-        const sum = relevantPrices.reduce((total, entry) => total + entry.price, 0);
-        return sum / relevantPrices.length;
+        const threshold = now - (days * 24 * 60 * 60 * 1000);
+        const relevant = h.filter(e => e.time >= threshold);
+        if (relevant.length === 0) return 0;
+        const sum = relevant.reduce((a, e) => a + e.price, 0);
+        return sum / relevant.length;
     }
-    
-    /**
-     * Entscheidet, welche Ressourcen gehandelt werden sollen
-     * @returns {Object|null} - Handelsentscheidung oder null, wenn kein Handel möglich
-     */
+
+    function updateMarketCache() {
+        try {
+            const currentOffers = extractMarketOffers();
+            if (currentOffers.length > 0) {
+                marketCache.offers = currentOffers;
+                marketCache.lastUpdate = Date.now();
+                calculateBestPrices();
+                updatePriceHistory();
+                saveData('twMarketBotMarketCache', marketCache);
+                log('Marktdaten-Cache aktualisiert');
+            }
+        } catch (e) {
+            logError('Fehler beim Aktualisieren des Marktdaten-Cache', e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // DORF-INFOS
+    // -------------------------------------------------------------------------
+    function extractVillageInfo() {
+        try {
+            const wood = document.getElementById('wood');
+            const stone = document.getElementById('stone');
+            const iron = document.getElementById('iron');
+            const storage = document.getElementById('storage');
+
+            if (wood) villageCache.resources.wood = parseInt(wood.textContent.replace(/\D/g, ''), 10) || 0;
+            if (stone) villageCache.resources.stone = parseInt(stone.textContent.replace(/\D/g, ''), 10) || 0;
+            if (iron) villageCache.resources.iron = parseInt(iron.textContent.replace(/\D/g, ''), 10) || 0;
+            if (storage) villageCache.storage = parseInt(storage.textContent.replace(/\D/g, ''), 10) || 0;
+
+            const ma = document.getElementById('market_merchant_available_count');
+            const mt = document.getElementById('market_merchant_total_count');
+            const mm = document.getElementById('market_merchant_max_transport');
+            if (ma) villageCache.merchantsAvailable = parseInt(ma.textContent.trim(), 10) || 0;
+            if (mt) villageCache.merchantsTotal = parseInt(mt.textContent.trim(), 10) || 0;
+            if (mm) villageCache.merchantMaxTransport = parseInt(mm.textContent.trim(), 10) || 0;
+
+            if (!ma || !mt) {
+                const bar = document.querySelector('#market_status_bar');
+                const txt = bar ? bar.textContent : '';
+                const m = txt && txt.match(/(\d+)\s*\/\s*(\d+)/);
+                if (m) {
+                    villageCache.merchantsAvailable = parseInt(m[1], 10) || 0;
+                    villageCache.merchantsTotal = parseInt(m[2], 10) || 0;
+                }
+            }
+
+            villageCache.lastUpdate = Date.now();
+            log('Dorf-Informationen aktualisiert');
+        } catch (e) {
+            logError('Fehler beim Extrahieren der Dorf-Informationen', e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // HANDELS-ENTSCHEIDUNG & AUSFÜHRUNG
+    // -------------------------------------------------------------------------
     function decideTradeAction() {
         if (villageCache.merchantsAvailable <= 0) {
-            log("Keine Händler verfügbar");
+            log('Keine Händler verfügbar');
             return null;
         }
-        
-        // Ressourcen analysieren
-        const resources = villageCache.resources;
-        const resourceTypes = ['wood', 'stone', 'iron'];
-        
-        // Ressource mit dem größten Überschuss finden
-        let excessResource = null;
-        let excessAmount = 0;
-        
-        // Ressource mit dem größten Mangel finden
-        let deficitResource = null;
-        let deficitAmount = CONFIG.maxResourceStock;
-        
-        resourceTypes.forEach(type => {
-            const amount = resources[type];
-            const priority = CONFIG.resourcePriority[type];
-            
-            // Überschuss berechnen (gewichtet nach Priorität)
+
+        const r = villageCache.resources;
+        const types = ['wood', 'stone', 'iron'];
+
+        let excessResource = null, excessAmount = 0;
+        let deficitResource = null, lowestAmount = CONFIG.maxResourceStock;
+
+        types.forEach(type => {
+            const amount = r[type];
+            const prio = CONFIG.resourcePriority[type];
+
             if (amount > CONFIG.maxResourceStock) {
                 const excess = amount - CONFIG.maxResourceStock;
-                const weightedExcess = excess * (10 - priority) / 10; // Niedrigere Priorität = höherer gewichteter Überschuss
-                
-                if (weightedExcess > excessAmount) {
-                    excessResource = type;
-                    excessAmount = excess; // Wir speichern den tatsächlichen Überschuss
-                }
+                const weighted = excess * (10 - prio) / 10;
+                if (weighted > excessAmount) { excessAmount = excess; excessResource = type; }
             }
-            
-            // Mangel berechnen (gewichtet nach Priorität)
             if (amount < CONFIG.minResourceStock) {
                 const deficit = CONFIG.minResourceStock - amount;
-                const weightedDeficit = deficit * priority / 10; // Höhere Priorität = höherer gewichteter Mangel
-                
-                if (weightedDeficit > 0 && amount < deficitAmount) {
-                    deficitResource = type;
-                    deficitAmount = amount; // Wir speichern den tatsächlichen Bestand
-                }
+                const weighted = deficit * prio / 10;
+                if (weighted > 0 && amount < lowestAmount) { lowestAmount = amount; deficitResource = type; }
             }
         });
-        
-        // Entscheiden, ob verkauft oder gekauft werden soll
+
         if (excessResource && deficitResource) {
-            // Wenn sowohl Überschuss als auch Mangel vorhanden, entscheide basierend auf Marktpreisen
             const sellPrice = marketCache.bestPrices.sell[excessResource] || 0;
             const buyPrice = marketCache.bestPrices.buy[deficitResource] || 0;
-            
             if (sellPrice > 0 && buyPrice > 0) {
-                // Berechne potentiellen Gewinn
-                const avgSellPrice = getAveragePriceFromHistory(excessResource);
-                const avgBuyPrice = getAveragePriceFromHistory(deficitResource);
-                
-                const potentialProfit = (sellPrice / avgSellPrice - 1) * 100;
-                const potentialSaving = (1 - buyPrice / avgBuyPrice) * 100;
-                
+                const avgSell = getAveragePriceFromHistory(excessResource);
+                const avgBuy = getAveragePriceFromHistory(deficitResource);
+                const potentialProfit = avgSell ? (sellPrice / avgSell - 1) * 100 : 0;
+                const potentialSaving = avgBuy ? (1 - buyPrice / avgBuy) * 100 : 0;
+
                 if (potentialProfit > potentialSaving && potentialProfit >= CONFIG.minProfitPercentage) {
-                    // Verkaufen ist profitabler
-                    return {
-                        action: 'sell',
-                        resource: excessResource,
-                        amount: Math.min(excessAmount, 1000), // Maximal 1000 pro Handel
-                        targetPrice: sellPrice
-                    };
+                    return { action: 'sell', resource: excessResource, amount: Math.min(excessAmount, 1000), targetPrice: sellPrice };
                 } else if (potentialSaving >= CONFIG.minProfitPercentage) {
-                    // Kaufen ist günstiger
-                    return {
-                        action: 'buy',
-                        resource: deficitResource,
-                        amount: Math.min(CONFIG.minResourceStock - deficitAmount, 1000), // Maximal 1000 pro Handel
-                        targetPrice: buyPrice
-                    };
+                    return { action: 'buy', resource: deficitResource, amount: Math.min(CONFIG.minResourceStock - lowestAmount, 1000), targetPrice: buyPrice };
                 }
             }
         } else if (excessResource) {
-            // Nur Überschuss vorhanden, versuche zu verkaufen
             const sellPrice = marketCache.bestPrices.sell[excessResource] || 0;
-            const avgPrice = getAveragePriceFromHistory(excessResource);
-            
-            if (sellPrice > 0 && avgPrice > 0 && (sellPrice / avgPrice - 1) * 100 >= CONFIG.minProfitPercentage) {
-                return {
-                    action: 'sell',
-                    resource: excessResource,
-                    amount: Math.min(excessAmount, 1000), // Maximal 1000 pro Handel
-                    targetPrice: sellPrice
-                };
+            const avg = getAveragePriceFromHistory(excessResource);
+            if (sellPrice > 0 && avg > 0 && (sellPrice / avg - 1) * 100 >= CONFIG.minProfitPercentage) {
+                return { action: 'sell', resource: excessResource, amount: Math.min(excessAmount, 1000), targetPrice: sellPrice };
             }
         } else if (deficitResource) {
-            // Nur Mangel vorhanden, versuche zu kaufen
             const buyPrice = marketCache.bestPrices.buy[deficitResource] || 0;
-            const avgPrice = getAveragePriceFromHistory(deficitResource);
-            
-            if (buyPrice > 0 && avgPrice > 0 && (1 - buyPrice / avgPrice) * 100 >= CONFIG.minProfitPercentage) {
-                return {
-                    action: 'buy',
-                    resource: deficitResource,
-                    amount: Math.min(CONFIG.minResourceStock - deficitAmount, 1000), // Maximal 1000 pro Handel
-                    targetPrice: buyPrice
-                };
+            const avg = getAveragePriceFromHistory(deficitResource);
+            if (buyPrice > 0 && avg > 0 && (1 - buyPrice / avg) * 100 >= CONFIG.minProfitPercentage) {
+                return { action: 'buy', resource: deficitResource, amount: Math.min(CONFIG.minResourceStock - lowestAmount, 1000), targetPrice: buyPrice };
             }
         }
-        
-        log("Keine profitable Handelsmöglichkeit gefunden");
+
+        log('Keine profitable Handelsmöglichkeit gefunden');
         return null;
     }
-    
-    /**
-     * Führt einen Handel durch
-     * @param {Object} tradeAction - Handelsaktion
-     * @returns {Promise<boolean>} - Erfolg des Handels
-     */
+
     async function executeTrade(tradeAction) {
-        try {
-            if (!tradeAction) return false;
-            
-            log(`Führe Handel aus: ${tradeAction.action} ${tradeAction.amount} ${tradeAction.resource}`);
-
-            /*------------------------------------------------------------------
-              Pfad A: Erweiterte Handelsfunktionen vorhanden
-            ------------------------------------------------------------------*/
-            if (EXT.acceptMarketOffer && EXT.navigateToMarketTab && EXT.executeBatchTrades) {
-                // 1. Markt-Tab vorbereiten – minimaler Traffic, nur wenn nötig
-                const navSuccess = await EXT.navigateToMarketTab('other_offers');
-                if (!navSuccess) {
-                    logError('Navigation zum Marktplatz fehlgeschlagen', new Error('navigateToMarketTab'));
-                    return false;
-                }
-
-                // 2. Aktuelle Angebote einsammeln (nur, wenn EXT das unterstützt)
-                let offers = [];
-                if (EXT.extractDetailedMarketOffers) {
-                    offers = EXT.extractDetailedMarketOffers();
-                }
-
-                // 3. Bestes Angebot nach Aktion filtern
-                const criteria = {
-                    action: tradeAction.action,
-                    resource: tradeAction.resource,
-                    minAmount: tradeAction.amount,
-                    maxAmount: tradeAction.amount,
-                    prioritizeBy: 'ratio'
-                };
-                let filtered = [];
-                if (EXT.findBestMarketOffers) {
-                    filtered = EXT.findBestMarketOffers(offers, criteria);
-                }
-
-                // 4. Falls passendes Angebot vorhanden -> akzeptieren
-                if (filtered && filtered.length > 0) {
-                    const successCount = await EXT.executeBatchTrades(filtered, 1);
-                    if (successCount > 0) {
-                        afterSuccessfulTrade(tradeAction);
-                        return true;
-                    }
-                }
-
-                // 5. Ansonsten ggf. eigenes Angebot erstellen (nur wenn EXT vorhanden)
-                if (tradeAction.action === 'sell' && EXT.createMarketOffer) {
-                    const createOk = await EXT.createMarketOffer({
-                        sellResource: tradeAction.resource,
-                        sellAmount: tradeAction.amount,
-                        buyResource: chooseAlternateResource(tradeAction.resource),
-                        buyAmount: tradeAction.amount
-                    });
-                    if (createOk) {
-                        afterSuccessfulTrade(tradeAction);
-                        return true;
-                    }
-                }
-
-                // Wenn alles fehlschlägt – zurückfallen auf simulierten Erfolg
-                log('Kein passendes Angebot gefunden – fallback (simuliert)');
-            }
-
-            /*------------------------------------------------------------------
-              Pfad B: Fallback-Simulation (bisheriges Verhalten)
-            ------------------------------------------------------------------*/
-
-            await delayedAction(() => afterSuccessfulTrade(tradeAction));
-            return true;
-        } catch (error) {
-            logError("Fehler beim Ausführen des Handels", error);
-            return false;
-        }
-
-        // Hilfsfunktion, um Stats nach erfolgreichem Handel zu aktualisieren
         function afterSuccessfulTrade(action) {
             stats.tradesCompleted++;
             stats.resourcesTraded[action.resource] += action.amount;
@@ -719,607 +429,414 @@
             saveData('twMarketBotStats', stats);
             log(`Handel erfolgreich: ${action.action} ${action.amount} ${action.resource}`);
         }
-
-        // Wählt eine alternative Ressource für Tauschgeschäfte
         function chooseAlternateResource(res) {
             const options = ['wood', 'stone', 'iron'].filter(r => r !== res);
             return options[Math.floor(Math.random() * options.length)];
         }
+
+        try {
+            if (!tradeAction) return false;
+            log(`Führe Handel aus: ${tradeAction.action} ${tradeAction.amount} ${tradeAction.resource}`);
+
+            // --- Erweiterte Funktionen vorhanden? ---
+            const EXT = getEXT();
+            if (EXT.navigateToMarketTab && EXT.executeBatchTrades) {
+                const ok = await EXT.navigateToMarketTab('other_offers');
+                if (!ok) {
+                    logError('Navigation zum Marktplatz fehlgeschlagen', new Error('navigateToMarketTab'));
+                    return false;
+                }
+
+                let offers = [];
+                if (EXT.extractDetailedMarketOffers) offers = EXT.extractDetailedMarketOffers();
+
+                const criteria = {
+                    action: tradeAction.action,
+                    resource: tradeAction.resource,
+                    minAmount: tradeAction.amount,
+                    maxAmount: tradeAction.amount,
+                    prioritizeBy: 'ratio'
+                };
+                let filtered = [];
+                if (EXT.findBestMarketOffers) filtered = EXT.findBestMarketOffers(offers, criteria);
+
+                if (filtered && filtered.length > 0) {
+                    const successCount = await EXT.executeBatchTrades(filtered, 1);
+                    if (successCount > 0) { afterSuccessfulTrade(tradeAction); return true; }
+                }
+
+                if (tradeAction.action === 'sell' && EXT.createMarketOffer) {
+                    const created = await EXT.createMarketOffer({
+                        sellResource: tradeAction.resource,
+                        sellAmount: tradeAction.amount,
+                        buyResource: chooseAlternateResource(tradeAction.resource),
+                        buyAmount: tradeAction.amount
+                    });
+                    if (created) { afterSuccessfulTrade(tradeAction); return true; }
+                }
+
+                log('Kein passendes Angebot gefunden – Fallback (simuliert)');
+            }
+
+            // --- Fallback: simulierte Ausführung ---
+            await delayedAction(() => afterSuccessfulTrade(tradeAction));
+            return true;
+        } catch (e) {
+            logError('Fehler beim Ausführen des Handels', e);
+            return false;
+        }
     }
-    
+
     // -------------------------------------------------------------------------
     // BENUTZEROBERFLÄCHE
     // -------------------------------------------------------------------------
-    
-    /**
-     * Erstellt die Benutzeroberfläche
-     */
     function createUI() {
         try {
-            // Styles für die UI
             GM_addStyle(`
                 #twMarketBot {
                     position: fixed;
                     bottom: 10px;
                     right: 10px;
-                    background: rgba(44, 62, 80, 0.9);
+                    background: rgba(44,62,80,0.92);
                     border: 1px solid #34495e;
                     border-radius: 5px;
                     padding: 10px;
                     color: #ecf0f1;
                     font-size: 12px;
-                    z-index: 9999;
+                    z-index: 2147483647;
                     width: 300px;
-                    max-height: 500px;
-                    overflow-y: auto;
-                    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+                    max-height: 520px;
+                    overflow: hidden;
+                    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+                    overscroll-behavior: contain;
                 }
-                
-                #twMarketBot h3 {
-                    margin: 0 0 10px 0;
-                    padding-bottom: 5px;
-                    border-bottom: 1px solid #34495e;
-                    font-size: 14px;
-                    text-align: center;
-                }
-                
-                #twMarketBot .bot-controls {
-                    display: flex;
-                    justify-content: space-between;
-                    margin-bottom: 10px;
-                }
-                
-                #twMarketBot button {
-                    background: #2980b9;
-                    color: white;
-                    border: none;
-                    padding: 5px 10px;
-                    border-radius: 3px;
-                    cursor: pointer;
-                }
-                
-                #twMarketBot button:hover {
-                    background: #3498db;
-                }
-                
-                #twMarketBot button.active {
-                    background: #27ae60;
-                }
-                
-                #twMarketBot button.disabled {
-                    background: #c0392b;
-                }
-                
-                #twMarketBot .status {
-                    margin: 10px 0;
-                    padding: 5px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 3px;
-                }
-                
-                #twMarketBot .section {
-                    margin-bottom: 10px;
-                }
-                
-                #twMarketBot .section-title {
-                    font-weight: bold;
-                    margin-bottom: 5px;
-                }
-                
-                #twMarketBot .resource-info {
-                    display: flex;
-                    justify-content: space-between;
-                }
-                
-                #twMarketBot .resource-item {
-                    flex: 1;
-                    text-align: center;
-                }
-                
-                #twMarketBot .resource-value {
-                    font-weight: bold;
-                }
-                
-                #twMarketBot .settings-row {
-                    display: flex;
-                    justify-content: space-between;
-                    margin-bottom: 5px;
-                }
-                
-                #twMarketBot .settings-label {
-                    flex: 2;
-                }
-                
-                #twMarketBot .settings-value {
-                    flex: 1;
-                    text-align: right;
-                }
-                
-                #twMarketBot input[type="number"] {
-                    width: 60px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border: 1px solid #34495e;
-                    color: white;
-                    padding: 2px 5px;
-                    border-radius: 3px;
-                }
-                
-                #twMarketBot .log {
-                    max-height: 100px;
-                    overflow-y: auto;
-                    background: rgba(0, 0, 0, 0.2);
-                    padding: 5px;
-                    border-radius: 3px;
-                    margin-top: 10px;
-                    font-family: monospace;
-                    font-size: 10px;
-                }
-                
-                #twMarketBot .toggle-section {
-                    cursor: pointer;
-                    user-select: none;
-                }
-                
-                #twMarketBot .toggle-section:after {
-                    content: " ▼";
-                    font-size: 10px;
-                }
-                
-                #twMarketBot .toggle-section.collapsed:after {
-                    content: " ►";
-                }
-                
-                #twMarketBot .section-content.collapsed {
-                    display: none;
-                }
-                
-                #twMarketBot .minimize-button {
-                    position: absolute;
-                    top: 10px;
-                    right: 10px;
-                    background: none;
-                    border: none;
-                    color: white;
-                    cursor: pointer;
-                    font-size: 16px;
-                    padding: 0;
-                }
-                
-                #twMarketBot.minimized {
-                    width: auto;
-                    height: auto;
-                    padding: 5px;
-                }
-                
-                #twMarketBot.minimized .bot-content {
-                    display: none;
-                }
-                
-                #twMarketBot .bot-icon {
-                    display: none;
-                    font-size: 20px;
-                    cursor: pointer;
-                }
-                
-                #twMarketBot.minimized .bot-icon {
-                    display: block;
-                }
+                #twMarketBot h3{margin:0 0 10px 0;padding-bottom:5px;border-bottom:1px solid #34495e;font-size:14px;text-align:center;}
+                #twMarketBot .bot-controls{display:flex;gap:6px;justify-content:space-between;margin-bottom:10px;}
+                #twMarketBot button{background:#2980b9;color:#fff;border:none;padding:5px 10px;border-radius:3px;cursor:pointer;}
+                #twMarketBot button:hover{background:#3498db;}
+                #twMarketBot button.active{background:#27ae60;}
+                #twMarketBot button.disabled{background:#c0392b;}
+                #twMarketBot .status{margin:10px 0;padding:5px;background:rgba(0,0,0,0.2);border-radius:3px;}
+                #twMarketBot .section{margin-bottom:10px;}
+                #twMarketBot .section-title{font-weight:bold;margin-bottom:5px;}
+                #twMarketBot .resource-info{display:flex;justify-content:space-between}
+                #twMarketBot .resource-item{flex:1;text-align:center}
+                #twMarketBot .resource-value{font-weight:bold}
+                #twMarketBot .settings-row{display:flex;justify-content:space-between;margin-bottom:5px;gap:6px;}
+                #twMarketBot .settings-label{flex:2}
+                #twMarketBot .settings-value{flex:1;text-align:right}
+                #twMarketBot input[type="number"]{width:70px;background:rgba(0,0,0,0.2);border:1px solid #34495e;color:#fff;padding:2px 5px;border-radius:3px;}
+                #twMarketBot .toggle-section{cursor:pointer;user-select:none}
+                #twMarketBot .toggle-section:after{content:" ▼";font-size:10px}
+                #twMarketBot .toggle-section.collapsed:after{content:" ►"}
+                #twMarketBot .section-content.collapsed{display:none}
+                #twMarketBot .minimize-button{position:absolute;top:10px;right:10px;background:none;border:none;color:#fff;cursor:pointer;font-size:16px;padding:0}
+                #twMarketBot.minimized{width:auto;height:auto;padding:5px}
+                #twMarketBot.minimized .bot-content{display:none}
+                #twMarketBot .bot-icon{display:none;font-size:20px;cursor:pointer}
+                #twMarketBot.minimized .bot-icon{display:block}
+                /* Besserer Scrollbereich für Log */
+                #twMarketBot .log{height:140px;max-height:140px;overflow-y:auto;background:rgba(0,0,0,0.2);padding:5px;border-radius:3px;margin-top:5px;font-family:monospace;font-size:11px;pointer-events:auto;}
             `);
-            
-            // UI-Container erstellen
-            const container = document.createElement('div');
-            container.id = 'twMarketBot';
-            
-            // UI-Inhalt
-            container.innerHTML = `
-                <div class="bot-icon" title="Tribal Wars Market Bot">💰</div>
-                <div class="bot-content">
-                    <button class="minimize-button" title="Minimieren">_</button>
-                    <h3>Tribal Wars Market Bot</h3>
-                    
-                    <div class="bot-controls">
-                        <button id="twMarketBotToggle" class="${CONFIG.enabled ? 'active' : 'disabled'}">
-                            ${CONFIG.enabled ? 'Aktiviert' : 'Deaktiviert'}
-                        </button>
-                        <button id="twMarketBotSettings">Einstellungen</button>
-                        <button id="twMarketBotStats">Statistik</button>
-                    </div>
-                    
-                    <div class="status">
-                        Status: <span id="twMarketBotStatus">${CONFIG.enabled ? 'Aktiv' : 'Inaktiv'}</span><br>
-                        Letzte Aktion: <span id="twMarketBotLastAction">-</span><br>
-                        Aktionen diese Session: <span id="twMarketBotSessionActions">0</span>/<span id="twMarketBotMaxActions">${CONFIG.maxActionsPerSession}</span>
-                    </div>
-                    
-                    <div class="section">
-                        <div class="section-title toggle-section" data-section="resources">Ressourcen</div>
-                        <div class="section-content" id="resourcesSection">
-                            <div class="resource-info">
-                                <div class="resource-item">
-                                    <div>Holz</div>
-                                    <div class="resource-value" id="twMarketBotWood">0</div>
-                                </div>
-                                <div class="resource-item">
-                                    <div>Lehm</div>
-                                    <div class="resource-value" id="twMarketBotStone">0</div>
-                                </div>
-                                <div class="resource-item">
-                                    <div>Eisen</div>
-                                    <div class="resource-value" id="twMarketBotIron">0</div>
-                                </div>
-                            </div>
-                            <div style="margin-top: 5px;">
-                                Lager: <span id="twMarketBotStorage">0</span><br>
-                                Händler: <span id="twMarketBotMerchants">0</span>/<span id="twMarketBotMerchantsTotal">0</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <div class="section-title toggle-section" data-section="market">Marktpreise</div>
-                        <div class="section-content" id="marketSection">
-                            <div class="settings-row">
-                                <div class="settings-label">Holz (Verkauf):</div>
-                                <div class="settings-value" id="twMarketBotWoodSellPrice">-</div>
-                            </div>
-                            <div class="settings-row">
-                                <div class="settings-label">Lehm (Verkauf):</div>
-                                <div class="settings-value" id="twMarketBotStoneSellPrice">-</div>
-                            </div>
-                            <div class="settings-row">
-                                <div class="settings-label">Eisen (Verkauf):</div>
-                                <div class="settings-value" id="twMarketBotIronSellPrice">-</div>
-                            </div>
-                            <div style="margin-top: 5px; font-size: 10px; text-align: right;">
-                                Letzte Aktualisierung: <span id="twMarketBotLastMarketUpdate">-</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <div class="section-title toggle-section collapsed" data-section="settings">Einstellungen</div>
-                        <div class="section-content collapsed" id="settingsSection">
-                            <div class="settings-row">
-                                <div class="settings-label">Min. Gewinn (%):</div>
-                                <div class="settings-value">
-                                    <input type="number" id="twMarketBotMinProfit" min="1" max="100" value="${CONFIG.minProfitPercentage}">
-                                </div>
-                            </div>
-                            <div class="settings-row">
-                                <div class="settings-label">Max. Ressourcen:</div>
-                                <div class="settings-value">
-                                    <input type="number" id="twMarketBotMaxResources" min="1000" step="1000" value="${CONFIG.maxResourceStock}">
-                                </div>
-                            </div>
-                            <div class="settings-row">
-                                <div class="settings-label">Min. Ressourcen:</div>
-                                <div class="settings-value">
-                                    <input type="number" id="twMarketBotMinResources" min="0" step="1000" value="${CONFIG.minResourceStock}">
-                                </div>
-                            </div>
-                            <div class="settings-row">
-                                <div class="settings-label">Ressourcen ausbalancieren:</div>
-                                <div class="settings-value">
-                                    <input type="checkbox" id="twMarketBotBalanceResources" ${CONFIG.balanceResources ? 'checked' : ''}>
-                                </div>
-                            </div>
-                            <div class="settings-row">
-                                <div class="settings-label">Debug-Modus:</div>
-                                <div class="settings-value">
-                                    <input type="checkbox" id="twMarketBotDebugMode" ${CONFIG.debugMode ? 'checked' : ''}>
-                                </div>
-                            </div>
-                            <button id="twMarketBotSaveSettings" style="width: 100%; margin-top: 5px;">Speichern</button>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
-                        <div class="section-title toggle-section collapsed" data-section="log">Log</div>
-                        <div class="section-content collapsed log" id="logSection">
-                            <div id="twMarketBotLog"></div>
-                        </div>
-                    </div>
+
+            const c = document.createElement('div');
+            c.id = 'twMarketBot';
+            c.innerHTML = `
+              <div class="bot-icon" title="Tribal Wars Market Bot">💰</div>
+              <div class="bot-content">
+                <button class="minimize-button" title="Minimieren">_</button>
+                <h3>Tribal Wars Market Bot</h3>
+
+                <div class="bot-controls">
+                  <button id="twMarketBotToggle" class="${CONFIG.enabled ? 'active' : 'disabled'}">${CONFIG.enabled ? 'Aktiviert' : 'Deaktiviert'}</button>
+                  <button id="twMarketBotSettings">Einstellungen</button>
+                  <button id="twMarketBotStats">Statistik</button>
                 </div>
+
+                <div class="status">
+                  Status: <span id="twMarketBotStatus">${CONFIG.enabled ? 'Aktiv' : 'Inaktiv'}</span><br>
+                  Letzte Aktion: <span id="twMarketBotLastAction">-</span><br>
+                  Aktionen diese Session: <span id="twMarketBotSessionActions">0</span>/<span id="twMarketBotMaxActions">${CONFIG.maxActionsPerSession}</span>
+                </div>
+
+                <div class="section">
+                  <div class="section-title toggle-section" data-section="resources">Ressourcen</div>
+                  <div class="section-content" id="resourcesSection">
+                    <div class="resource-info">
+                      <div class="resource-item"><div>Holz</div><div class="resource-value" id="twMarketBotWood">0</div></div>
+                      <div class="resource-item"><div>Lehm</div><div class="resource-value" id="twMarketBotStone">0</div></div>
+                      <div class="resource-item"><div>Eisen</div><div class="resource-value" id="twMarketBotIron">0</div></div>
+                    </div>
+                    <div style="margin-top:5px;">
+                      Lager: <span id="twMarketBotStorage">0</span><br>
+                      Händler: <span id="twMarketBotMerchants">0</span>/<span id="twMarketBotMerchantsTotal">0</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="section">
+                  <div class="section-title toggle-section" data-section="market">Marktpreise</div>
+                  <div class="section-content" id="marketSection">
+                    <div class="settings-row"><div class="settings-label">Holz (Verkauf):</div><div class="settings-value" id="twMarketBotWoodSellPrice">-</div></div>
+                    <div class="settings-row"><div class="settings-label">Lehm (Verkauf):</div><div class="settings-value" id="twMarketBotStoneSellPrice">-</div></div>
+                    <div class="settings-row"><div class="settings-label">Eisen (Verkauf):</div><div class="settings-value" id="twMarketBotIronSellPrice">-</div></div>
+                    <div style="margin-top:5px;font-size:10px;text-align:right;">
+                      Letzte Aktualisierung: <span id="twMarketBotLastMarketUpdate">-</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="section">
+                  <div class="section-title toggle-section collapsed" data-section="stats">Statistik</div>
+                  <div class="section-content collapsed" id="statsSection">
+                    <div class="settings-row"><div class="settings-label">Abgeschlossene Trades:</div><div class="settings-value" id="twMarketBotTradesCompleted">0</div></div>
+                    <div class="settings-row"><div class="settings-label">Gehandelt (Holz/Lehm/Eisen):</div>
+                      <div class="settings-value"><span id="twMarketBotTradedWood">0</span> / <span id="twMarketBotTradedStone">0</span> / <span id="twMarketBotTradedIron">0</span></div>
+                    </div>
+                    <div class="settings-row"><div class="settings-label">Fehler (letzte 3):</div><div class="settings-value" id="twMarketBotLastErrors">-</div></div>
+                  </div>
+                </div>
+
+                <div class="section">
+                  <div class="section-title toggle-section collapsed" data-section="settings">Einstellungen</div>
+                  <div class="section-content collapsed" id="settingsSection">
+                    <div class="settings-row"><div class="settings-label">Min. Gewinn (%):</div><div class="settings-value"><input type="number" id="twMarketBotMinProfit" min="1" max="100" value="${CONFIG.minProfitPercentage}"></div></div>
+                    <div class="settings-row"><div class="settings-label">Max. Ressourcen:</div><div class="settings-value"><input type="number" id="twMarketBotMaxResources" min="1000" step="1000" value="${CONFIG.maxResourceStock}"></div></div>
+                    <div class="settings-row"><div class="settings-label">Min. Ressourcen:</div><div class="settings-value"><input type="number" id="twMarketBotMinResources" min="0" step="1000" value="${CONFIG.minResourceStock}"></div></div>
+                    <div class="settings-row"><div class="settings-label">Ressourcen ausbalancieren:</div><div class="settings-value"><input type="checkbox" id="twMarketBotBalanceResources" ${CONFIG.balanceResources ? 'checked' : ''}></div></div>
+                    <div class="settings-row"><div class="settings-label">Debug-Modus:</div><div class="settings-value"><input type="checkbox" id="twMarketBotDebugMode" ${CONFIG.debugMode ? 'checked' : ''}></div></div>
+                    <button id="twMarketBotSaveSettings" style="width:100%;margin-top:5px;">Speichern</button>
+                  </div>
+                </div>
+
+                <div class="section">
+                  <div class="section-title toggle-section collapsed" data-section="log">Log</div>
+                  <div class="section-content collapsed log" id="logSection">
+                    <div id="twMarketBotLog"></div>
+                  </div>
+                </div>
+              </div>
             `;
-            
-            // UI zum DOM hinzufügen
-            document.body.appendChild(container);
-            
-            // Event-Listener für UI-Elemente
+            document.body.appendChild(c);
             setupUIEventListeners();
-            
-            log("UI erstellt");
-        } catch (error) {
-            logError("Fehler beim Erstellen der UI", error);
+            log('UI erstellt');
+        } catch (e) {
+            logError('Fehler beim Erstellen der UI', e);
         }
     }
-    
-    /**
-     * Richtet Event-Listener für UI-Elemente ein
-     */
+
     function setupUIEventListeners() {
         try {
-            // Toggle-Button
-            const toggleButton = document.getElementById('twMarketBotToggle');
-            if (toggleButton) {
-                toggleButton.addEventListener('click', () => {
+            const toggleBtn = document.getElementById('twMarketBotToggle');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
                     CONFIG.enabled = !CONFIG.enabled;
-                    toggleButton.className = CONFIG.enabled ? 'active' : 'disabled';
-                    toggleButton.textContent = CONFIG.enabled ? 'Aktiviert' : 'Deaktiviert';
+                    toggleBtn.className = CONFIG.enabled ? 'active' : 'disabled';
+                    toggleBtn.textContent = CONFIG.enabled ? 'Aktiviert' : 'Deaktiviert';
                     document.getElementById('twMarketBotStatus').textContent = CONFIG.enabled ? 'Aktiv' : 'Inaktiv';
                     saveData('twMarketBotConfig', CONFIG);
+                    window.twMarketBotConfig = CONFIG;
                     log(`Bot ${CONFIG.enabled ? 'aktiviert' : 'deaktiviert'}`);
                 });
             }
-            
+
+            // Sections togglen
+            const toggleSections = document.querySelectorAll('.toggle-section');
+            toggleSections.forEach((s) => {
+                s.addEventListener('click', () => {
+                    const name = s.getAttribute('data-section');
+                    const content = document.getElementById(`${name}Section`);
+                    s.classList.toggle('collapsed');
+                    content.classList.toggle('collapsed');
+                });
+            });
+
+            // Helper zum Öffnen und Hinscrollen
+            function openSection(name) {
+                const header = document.querySelector(`.toggle-section[data-section="${name}"]`);
+                const content = document.getElementById(`${name}Section`);
+                if (!header || !content) return;
+                header.classList.remove('collapsed');
+                content.classList.remove('collapsed');
+                content.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            const settingsBtn = document.getElementById('twMarketBotSettings');
+            if (settingsBtn) settingsBtn.addEventListener('click', () => openSection('settings'));
+
+            const statsBtn = document.getElementById('twMarketBotStats');
+            if (statsBtn) statsBtn.addEventListener('click', () => openSection('stats'));
+
+            const minimizeButton = document.querySelector('.minimize-button');
+            const botIcon = document.querySelector('.bot-icon');
+            if (minimizeButton) minimizeButton.addEventListener('click', () => document.getElementById('twMarketBot').classList.add('minimized'));
+            if (botIcon) botIcon.addEventListener('click', () => document.getElementById('twMarketBot').classList.remove('minimized'));
+
             // Einstellungen speichern
             const saveSettingsButton = document.getElementById('twMarketBotSaveSettings');
             if (saveSettingsButton) {
                 saveSettingsButton.addEventListener('click', () => {
-                    // Einstellungen aus UI-Elementen auslesen
-                    CONFIG.minProfitPercentage = parseInt(document.getElementById('twMarketBotMinProfit').value) || 15;
-                    CONFIG.maxResourceStock = parseInt(document.getElementById('twMarketBotMaxResources').value) || 25000;
-                    CONFIG.minResourceStock = parseInt(document.getElementById('twMarketBotMinResources').value) || 5000;
-                    CONFIG.balanceResources = document.getElementById('twMarketBotBalanceResources').checked;
-                    CONFIG.debugMode = document.getElementById('twMarketBotDebugMode').checked;
-                    
-                    // Einstellungen speichern
+                    CONFIG.minProfitPercentage = parseInt(document.getElementById('twMarketBotMinProfit').value, 10) || 15;
+                    CONFIG.maxResourceStock   = parseInt(document.getElementById('twMarketBotMaxResources').value, 10) || 25000;
+                    CONFIG.minResourceStock   = parseInt(document.getElementById('twMarketBotMinResources').value, 10) || 5000;
+                    CONFIG.balanceResources   = document.getElementById('twMarketBotBalanceResources').checked;
+                    CONFIG.debugMode          = document.getElementById('twMarketBotDebugMode').checked;
                     saveData('twMarketBotConfig', CONFIG);
-                    log("Einstellungen gespeichert");
+                    window.twMarketBotConfig = CONFIG;
+                    log('Einstellungen gespeichert');
                 });
             }
-            
-            // Toggle-Sections
-            const toggleSections = document.querySelectorAll('.toggle-section');
-            toggleSections.forEach(section => {
-                section.addEventListener('click', () => {
-                    const sectionName = section.getAttribute('data-section');
-                    const content = document.getElementById(`${sectionName}Section`);
-                    
-                    section.classList.toggle('collapsed');
-                    content.classList.toggle('collapsed');
-                });
-            });
-            
-            // Minimieren/Maximieren
-            const minimizeButton = document.querySelector('.minimize-button');
-            const botIcon = document.querySelector('.bot-icon');
-            
-            if (minimizeButton) {
-                minimizeButton.addEventListener('click', () => {
-                    document.getElementById('twMarketBot').classList.add('minimized');
-                });
-            }
-            
-            if (botIcon) {
-                botIcon.addEventListener('click', () => {
-                    document.getElementById('twMarketBot').classList.remove('minimized');
-                });
-            }
-            
-            log("UI-Event-Listener eingerichtet");
-        } catch (error) {
-            logError("Fehler beim Einrichten der UI-Event-Listener", error);
+
+            log('UI-Event-Listener eingerichtet');
+        } catch (e) {
+            logError('Fehler beim Einrichten der UI-Events', e);
         }
     }
-    
-    /**
-     * Aktualisiert die UI mit aktuellen Daten
-     */
+
     function updateUI() {
         try {
-            // Ressourcen aktualisieren
-            document.getElementById('twMarketBotWood').textContent = villageCache.resources.wood.toLocaleString();
-            document.getElementById('twMarketBotStone').textContent = villageCache.resources.stone.toLocaleString();
-            document.getElementById('twMarketBotIron').textContent = villageCache.resources.iron.toLocaleString();
-            document.getElementById('twMarketBotStorage').textContent = villageCache.storage.toLocaleString();
-            document.getElementById('twMarketBotMerchants').textContent = villageCache.merchantsAvailable;
-            document.getElementById('twMarketBotMerchantsTotal').textContent = villageCache.merchantsTotal;
-            
-            // Marktpreise aktualisieren
-            document.getElementById('twMarketBotWoodSellPrice').textContent = marketCache.bestPrices.sell.wood.toFixed(2);
-            document.getElementById('twMarketBotStoneSellPrice').textContent = marketCache.bestPrices.sell.stone.toFixed(2);
-            document.getElementById('twMarketBotIronSellPrice').textContent = marketCache.bestPrices.sell.iron.toFixed(2);
-            
-            // Letzte Aktualisierung
-            const lastUpdateTime = new Date(marketCache.lastUpdate).toLocaleTimeString();
-            document.getElementById('twMarketBotLastMarketUpdate').textContent = lastUpdateTime;
-            
-            // Status aktualisieren
+            const fmt = (n) => (n && n > 0 ? n.toFixed(2) : '-');
+
+            // Ressourcen
+            const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = (typeof v === 'number') ? v.toLocaleString() : v; };
+            setText('twMarketBotWood',  villageCache.resources.wood);
+            setText('twMarketBotStone', villageCache.resources.stone);
+            setText('twMarketBotIron',  villageCache.resources.iron);
+            setText('twMarketBotStorage', villageCache.storage);
+            setText('twMarketBotMerchants', villageCache.merchantsAvailable);
+            setText('twMarketBotMerchantsTotal', villageCache.merchantsTotal);
+
+            // Preise
+            const w = document.getElementById('twMarketBotWoodSellPrice');  if (w) w.textContent = fmt(marketCache.bestPrices.sell.wood);
+            const s = document.getElementById('twMarketBotStoneSellPrice'); if (s) s.textContent = fmt(marketCache.bestPrices.sell.stone);
+            const i = document.getElementById('twMarketBotIronSellPrice');  if (i) i.textContent = fmt(marketCache.bestPrices.sell.iron);
+
+            // Zeit
+            const last = document.getElementById('twMarketBotLastMarketUpdate');
+            if (last) last.textContent = marketCache.lastUpdate ? new Date(marketCache.lastUpdate).toLocaleTimeString() : '-';
+
             if (stats.lastAction > 0) {
-                const lastActionTime = new Date(stats.lastAction).toLocaleTimeString();
-                document.getElementById('twMarketBotLastAction').textContent = lastActionTime;
+                const la = document.getElementById('twMarketBotLastAction');
+                if (la) la.textContent = new Date(stats.lastAction).toLocaleTimeString();
             }
-            
-            document.getElementById('twMarketBotSessionActions').textContent = stats.sessionActions;
-            document.getElementById('twMarketBotMaxActions').textContent = CONFIG.maxActionsPerSession;
-            
-            log("UI aktualisiert");
-        } catch (error) {
-            logError("Fehler beim Aktualisieren der UI", error);
+            const sa = document.getElementById('twMarketBotSessionActions');
+            if (sa) sa.textContent = stats.sessionActions;
+            const ma = document.getElementById('twMarketBotMaxActions');
+            if (ma) ma.textContent = CONFIG.maxActionsPerSession;
+
+            // Statistik
+            const tCompleted = document.getElementById('twMarketBotTradesCompleted');
+            if (tCompleted) tCompleted.textContent = stats.tradesCompleted.toLocaleString();
+
+            const tWood  = document.getElementById('twMarketBotTradedWood');
+            const tStone = document.getElementById('twMarketBotTradedStone');
+            const tIron  = document.getElementById('twMarketBotTradedIron');
+            if (tWood)  tWood.textContent  = stats.resourcesTraded.wood.toLocaleString();
+            if (tStone) tStone.textContent = stats.resourcesTraded.stone.toLocaleString();
+            if (tIron)  tIron.textContent  = stats.resourcesTraded.iron.toLocaleString();
+
+            const lastErrorsEl = document.getElementById('twMarketBotLastErrors');
+            if (lastErrorsEl) {
+                const last3 = (stats.errors || []).slice(-3).map(e => e.message).join(' | ');
+                lastErrorsEl.textContent = last3 || '-';
+            }
+
+            log('UI aktualisiert');
+        } catch (e) {
+            logError('Fehler beim Aktualisieren der UI', e);
         }
     }
-    
-    /**
-     * Fügt eine Nachricht zum Log hinzu
-     * @param {string} message - Nachricht
-     */
+
     function addToUILog(message) {
         try {
             const logElement = document.getElementById('twMarketBotLog');
             if (logElement) {
                 const timestamp = new Date().toLocaleTimeString();
-                const logEntry = document.createElement('div');
-                logEntry.textContent = `[${timestamp}] ${message}`;
-                logElement.appendChild(logEntry);
-                
-                // Scroll zum Ende
+                const entry = document.createElement('div');
+                entry.textContent = `[${timestamp}] ${message}`;
+                logElement.appendChild(entry);
                 logElement.scrollTop = logElement.scrollHeight;
-                
-                // Begrenze die Anzahl der Log-Einträge
-                while (logElement.children.length > 50) {
-                    logElement.removeChild(logElement.firstChild);
-                }
+                while (logElement.children.length > 200) logElement.removeChild(logElement.firstChild);
             }
-        } catch (error) {
-            console.error("Fehler beim Hinzufügen zum UI-Log:", error);
+        } catch (e) {
+            console.error('Fehler beim Hinzufügen zum UI-Log:', e);
         }
     }
-    
+
     // -------------------------------------------------------------------------
-    // HAUPTLOGIK
+    // HAUPT-INIT & LOOP
     // -------------------------------------------------------------------------
-    
-    /**
-     * Initialisiert den Bot
-     */
     function initBot() {
         try {
-            // Gespeicherte Konfiguration laden
             const savedConfig = loadData('twMarketBotConfig', null);
-            if (savedConfig) {
-                Object.assign(CONFIG, savedConfig);
-                log("Gespeicherte Konfiguration geladen");
-            }
-            
-            // Gespeicherte Marktdaten laden
+            if (savedConfig) Object.assign(CONFIG, savedConfig);
+            window.twMarketBotConfig = CONFIG;
+
             const savedMarketCache = loadData('twMarketBotMarketCache', null);
-            if (savedMarketCache) {
-                Object.assign(marketCache, savedMarketCache);
-                log("Gespeicherte Marktdaten geladen");
-            }
-            
-            // Gespeicherte Statistik laden
+            if (savedMarketCache) Object.assign(marketCache, savedMarketCache);
+
             const savedStats = loadData('twMarketBotStats', null);
-            if (savedStats) {
-                Object.assign(stats, savedStats);
-                log("Gespeicherte Statistik geladen");
-            }
-            
-            // UI erstellen
+            if (savedStats) Object.assign(stats, savedStats);
+
             createUI();
-            
-            // Initialen Scan durchführen
-            if (isMarketPage()) {
-                updateMarketCache();
-            }
-            
+
+            if (isMarketOfferPage()) updateMarketCache();
             extractVillageInfo();
             updateUI();
-            
-            // Hauptschleife starten
+
             setTimeout(mainLoop, randomDelay(5000, 10000));
-            
-            log("Bot initialisiert");
-        } catch (error) {
-            logError("Fehler bei der Bot-Initialisierung", error);
+            log('Bot initialisiert');
+        } catch (e) {
+            logError('Fehler bei der Bot-Initialisierung', e);
         }
     }
-    
-    /**
-     * Prüft, ob die aktuelle Seite der Marktplatz ist
-     * @returns {boolean} - true, wenn die aktuelle Seite der Marktplatz ist
-     */
-    function isMarketPage() {
-        return window.location.href.includes('screen=market');
-    }
-    
-    /**
-     * Prüft, ob die aktuelle Seite die Marktplatz-Angebotsseite ist
-     * @returns {boolean} - true, wenn die aktuelle Seite die Marktplatz-Angebotsseite ist
-     */
-    function isMarketOfferPage() {
-        // Erkenne "andere Angebote" korrekt und nutze Fallback, falls die URL keinen
-        // Modusparameter enthält, aber die Angebots-Tabelle bereits im DOM vorhanden ist.
-        return isMarketPage() && (
-            window.location.href.includes('mode=other_offers') ||          // korrekter Parameter
-            document.querySelector('#market_offer_table')                  // Fallback-Selektor
-        );
-    }
-    
-    /**
-     * Hauptschleife des Bots
-     */
+
     async function mainLoop() {
         try {
             if (!CONFIG.enabled) {
-                log("Bot ist deaktiviert, überspringe Hauptschleife");
                 setTimeout(mainLoop, 10000);
                 return;
             }
-            
-            log("Hauptschleife gestartet");
-            
-            // Aktualisiere Dorf-Informationen
+
             extractVillageInfo();
-            
-            // Wenn auf Marktplatz-Seite, aktualisiere Marktdaten
-            if (isMarketOfferPage()) {
-                updateMarketCache();
-            }
-            
-            // UI aktualisieren
+            if (isMarketOfferPage()) updateMarketCache();
             updateUI();
-            
-            // Prüfe, ob Session-Limit erreicht ist
+
             if (stats.sessionActions >= CONFIG.maxActionsPerSession) {
-                log(`Session-Limit erreicht (${stats.sessionActions}/${CONFIG.maxActionsPerSession}), starte neue Session nach Pause`);
-                
-                // Berechne Pausenzeit
-                const pauseMinutes = randomDelay(CONFIG.minSessionPause * 60000, CONFIG.maxSessionPause * 60000);
-                const pauseMinutesFormatted = Math.round(pauseMinutes / 60000);
-                
-                addToUILog(`Session-Pause für ca. ${pauseMinutesFormatted} Minuten`);
-                
-                // Setze Session-Aktionen zurück nach der Pause
+                const pauseMs = randomDelay(CONFIG.minSessionPause * 60000, CONFIG.maxSessionPause * 60000);
+                const mins = Math.round(pauseMs / 60000);
+                addToUILog(`Session-Pause für ca. ${mins} Minuten`);
                 setTimeout(() => {
                     stats.sessionActions = 0;
                     saveData('twMarketBotStats', stats);
-                    log("Neue Session gestartet");
-                    addToUILog("Neue Session gestartet");
+                    addToUILog('Neue Session gestartet');
                     mainLoop();
-                }, pauseMinutes);
-                
+                }, pauseMs);
                 return;
             }
-            
-            // Entscheide, ob eine Handelsaktion durchgeführt werden soll
+
             const tradeAction = decideTradeAction();
-            
             if (tradeAction) {
-                // Führe Handel durch
-                const success = await executeTrade(tradeAction);
-                
-                if (success) {
-                    addToUILog(`Handel: ${tradeAction.action} ${tradeAction.amount} ${tradeAction.resource}`);
-                } else {
-                    addToUILog(`Handel fehlgeschlagen: ${tradeAction.action} ${tradeAction.resource}`);
-                }
-            } else {
-                log("Kein Handel möglich im Moment");
+                const ok = await executeTrade(tradeAction);
+                if (ok) addToUILog(`Handel: ${tradeAction.action} ${tradeAction.amount} ${tradeAction.resource}`);
+                else addToUILog(`Handel fehlgeschlagen: ${tradeAction.action} ${tradeAction.resource}`);
             }
-            
-            // Human-like Verhalten: Zufällige Pause vor nächster Iteration
-            const nextLoopDelay = randomDelay(30000, 120000); // 30s - 2min
-            log(`Nächste Iteration in ${Math.round(nextLoopDelay / 1000)}s`);
-            
-            setTimeout(mainLoop, nextLoopDelay);
-        } catch (error) {
-            logError("Fehler in der Hauptschleife", error);
-            
-            // Bei Fehler trotzdem weitermachen nach einer Pause
+
+            const nextDelay = randomDelay(30000, 120000);
+            setTimeout(mainLoop, nextDelay);
+        } catch (e) {
+            logError('Fehler in der Hauptschleife', e);
             setTimeout(mainLoop, 60000);
         }
     }
-    
-    // Globale Funktionen für externe Nutzung
+
+    // Externe Logger für Extensions
     window.twMarketBotLog = addToUILog;
-    window.twMarketBotLogError = function(message, error) {
-        logError(message, error);
+    window.twMarketBotLogError = function (message, error) {
+        console.error('[TW Market Bot] ' + message, error);
         addToUILog(`Fehler: ${message}`);
     };
-    
-    // Bot starten
+
+    // Los geht's
     initBot();
-    
 })();
