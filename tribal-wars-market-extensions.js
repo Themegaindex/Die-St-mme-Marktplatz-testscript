@@ -314,75 +314,76 @@ function findBestMarketOffers(offers, criteria) {
             log("No offers to analyze");
             return [];
         }
-        
-        // Default criteria
+
+        // -----------------------------------------------------------------
+        // Default criteria & merge with caller-provided values
+        // -----------------------------------------------------------------
         const defaultCriteria = {
-            action: 'buy', // 'buy' or 'sell'
-            resource: 'wood', // Target resource
-            minAmount: 0, // Minimum amount
-            maxAmount: 1000000, // Maximum amount
-            maxDistance: 50, // Maximum distance
-            minRatio: 0, // Minimum price ratio
-            maxMerchants: 10, // Maximum merchants to use
-            prioritizeBy: 'ratio' // 'ratio', 'distance', 'amount'
+            action: 'buy',              // 'buy' or 'sell'
+            resource: 'wood',           // Target resource
+            buyResource: null,          // (Optional) desired counter-resource
+            minAmount: 0,
+            maxAmount: 1_000_000,
+            maxDistance: 50,
+            minRatio: 0,                // For SELL actions → minimum acceptable ratio
+            maxRatio: Infinity,         // For BUY actions → maximum acceptable ratio
+            maxMerchants: 10,
+            prioritizeBy: 'ratio'       // 'ratio', 'distance', 'amount'
         };
-        
-        // Merge with provided criteria
-        const finalCriteria = { ...defaultCriteria, ...criteria };
-        
-        // Filter offers based on criteria
-        let filteredOffers = offers.filter(offer => {
-            // For buying: we want offers where someone is selling our desired resource
-            if (finalCriteria.action === 'buy') {
-                return (
-                    offer.sellResource === finalCriteria.resource &&
-                    offer.sellAmount >= finalCriteria.minAmount &&
-                    offer.sellAmount <= finalCriteria.maxAmount &&
-                    (finalCriteria.maxDistance === 0 || offer.distance <= finalCriteria.maxDistance) &&
-                    offer.merchantsRequired <= finalCriteria.maxMerchants &&
-                    (finalCriteria.minRatio === 0 || offer.ratio >= finalCriteria.minRatio)
-                );
-            }
-            // For selling: we want offers where someone is buying our resource
-            else {
-                return (
-                    offer.buyResource === finalCriteria.resource &&
-                    offer.buyAmount >= finalCriteria.minAmount &&
-                    offer.buyAmount <= finalCriteria.maxAmount &&
-                    (finalCriteria.maxDistance === 0 || offer.distance <= finalCriteria.maxDistance) &&
-                    offer.merchantsRequired <= finalCriteria.maxMerchants &&
-                    (finalCriteria.minRatio === 0 || (1 / offer.ratio) >= finalCriteria.minRatio)
-                );
+
+        const c = { ...defaultCriteria, ...criteria };
+
+        // -----------------------------------------------------------------
+        // Filtering
+        // -----------------------------------------------------------------
+        const filtered = offers.filter(o => {
+            if (!o || !o.sellResource || !o.buyResource || !o.sellAmount || !o.buyAmount)
+                return false;
+
+            // Optional counter-resource constraint
+            if (c.buyResource && o.buyResource !== c.buyResource && o.sellResource !== c.resource)
+                return false;
+
+            if (c.action === 'buy') {
+                // We BUY c.resource → we need offers SELLING c.resource
+                if (o.sellResource !== c.resource) return false;
+                if (o.sellAmount < c.minAmount || o.sellAmount > c.maxAmount) return false;
+                if (c.maxDistance !== 0 && o.distance > c.maxDistance) return false;
+                if (o.merchantsRequired > c.maxMerchants) return false;
+                // Cheap purchase: ratio must be <= maxRatio
+                if (o.ratio > c.maxRatio) return false;
+                if (c.minRatio && o.ratio < c.minRatio) return false; // optional lower bound
+                return true;
+            } else {
+                // We SELL c.resource → need offers BUYING c.resource
+                if (o.buyResource !== c.resource) return false;
+                if (o.buyAmount < c.minAmount || o.buyAmount > c.maxAmount) return false;
+                if (c.maxDistance !== 0 && o.distance > c.maxDistance) return false;
+                if (o.merchantsRequired > c.maxMerchants) return false;
+                // Profitable sale: ratio must be >= minRatio
+                if (o.ratio < c.minRatio) return false;
+                if (o.ratio > c.maxRatio) return false; // optional upper bound
+                return true;
             }
         });
-        
-        // Sort offers based on priority
-        if (finalCriteria.prioritizeBy === 'ratio') {
-            // For buying: lower ratio is better (cheaper)
-            // For selling: higher ratio is better (more profit)
-            filteredOffers.sort((a, b) => {
-                if (finalCriteria.action === 'buy') {
-                    return a.ratio - b.ratio; // Ascending for buying
-                } else {
-                    return b.ratio - a.ratio; // Descending for selling
-                }
-            });
-        } else if (finalCriteria.prioritizeBy === 'distance') {
-            // Shorter distance is always better
-            filteredOffers.sort((a, b) => a.distance - b.distance);
-        } else if (finalCriteria.prioritizeBy === 'amount') {
-            // Sort by amount (higher first)
-            filteredOffers.sort((a, b) => {
-                if (finalCriteria.action === 'buy') {
-                    return b.sellAmount - a.sellAmount;
-                } else {
-                    return b.buyAmount - a.buyAmount;
-                }
-            });
+
+        // -----------------------------------------------------------------
+        // Sorting
+        // -----------------------------------------------------------------
+        if (c.prioritizeBy === 'ratio') {
+            filtered.sort((a, b) =>
+                c.action === 'buy' ? a.ratio - b.ratio : b.ratio - a.ratio
+            );
+        } else if (c.prioritizeBy === 'distance') {
+            filtered.sort((a, b) => a.distance - b.distance);
+        } else if (c.prioritizeBy === 'amount') {
+            filtered.sort((a, b) =>
+                c.action === 'buy' ? b.sellAmount - a.sellAmount : b.buyAmount - a.buyAmount
+            );
         }
-        
-        log(`Found ${filteredOffers.length} offers matching criteria`);
-        return filteredOffers;
+
+        log(`Found ${filtered.length} offers matching criteria`);
+        return filtered;
     } catch (error) {
         logError("Error finding best market offers", error);
         return [];

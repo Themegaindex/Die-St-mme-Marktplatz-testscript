@@ -22,17 +22,6 @@
 // @match        *://*.plemena.net/*
 // @match        *://*.tribalwars.ae/*
 // @match        *://*.tribalwars.works/*
-// -------------------------------------------------------------------------
-//  OPTIONAL ADVANCED FEATURES
-// -------------------------------------------------------------------------
-//  Um die erweiterten Handels- und Anti-Detection-Funktionen zu aktivieren,
-//  entferne einfach die Kommentarzeichen in der folgenden Zeile. Tampermonkey
-//  lädt dann automatisch das Erweiterungs-Script von GitHub.
-//
-//  Hinweis:  Bei lokalen Tests kannst du stattdessen eine lokale Datei
-//            verwenden, z. B.  // @require file://C:/Pfad/zu/tribal-wars-market-extensions.js
-//
-// @require     https://raw.githubusercontent.com/Themegaindex/Die-St-mme-Marktplatz-testscript/main/tribal-wars-market-extensions.js
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
@@ -131,12 +120,6 @@
         lastAction: 0,                 // Zeitpunkt der letzten Aktion
         sessionActions: 0,             // Aktionen in der aktuellen Session
         errors: []                     // Aufgetretene Fehler
-    };
-    
-    // UI-Status
-    const uiState = {
-        activeSection: null,           // Aktuell aktive Sektion (settings, stats, etc.)
-        isMinimized: false             // Ist das UI minimiert?
     };
     
     // -------------------------------------------------------------------------
@@ -246,10 +229,6 @@
         if (CONFIG.debugMode) {
             console.log(`[TW Market Bot] ${message}`);
         }
-        // Immer zum UI-Log hinzufügen, wenn es wichtig ist
-        if (message.includes("Fehler") || message.includes("erfolgreich") || CONFIG.debugMode) {
-            addToUILog(message);
-        }
     }
     
     /**
@@ -271,9 +250,6 @@
         }
         
         saveData('twMarketBotStats', stats);
-        
-        // Immer zum UI-Log hinzufügen
-        addToUILog(`Fehler: ${message}`);
     }
     
     // -------------------------------------------------------------------------
@@ -287,129 +263,87 @@
     function extractMarketOffers() {
         const offers = [];
         try {
-            // Basierend auf der echten HTML-Struktur
-            const offerTable = document.querySelector('table.vis:not(.modemenu)');
-            if (!offerTable) {
+            // Bevorzugt die echte Angebots-Tabelle
+            const table = document.querySelector('#market_offer_table') ||
+                          document.querySelector('table.vis:not(.modemenu)');
+            if (!table) {
                 log("Keine Angebots-Tabelle gefunden");
                 return offers;
             }
-            
-            const offerRows = offerTable.querySelectorAll('tr:not(:first-child)');
-            
-            offerRows.forEach(row => {
+
+            const rows = table.querySelectorAll('tr');
+            rows.forEach((row) => {
                 const cells = row.querySelectorAll('td');
-                if (cells.length >= 7) { // Mindestens 7 Spalten: Erhalte, Für, Spieler, Dauer, Verhältnis, Verfügbarkeit, Annehmen
-                    // Extrahiere Angebotsdaten
-                    const offer = {
-                        id: '',
-                        sellResource: '',
-                        sellAmount: 0,
-                        buyResource: '',
-                        buyAmount: 0,
-                        ratio: 0,
-                        village: '',
-                        distance: 0,
-                        travelTime: '',
-                        actionButton: null,
-                        timestamp: Date.now()
-                    };
-                    
-                    // ID aus dem Annehmen-Button extrahieren
-                    const acceptForm = cells[6].querySelector('form.market_accept_offer');
-                    if (acceptForm) {
-                        const idInput = acceptForm.querySelector('input[name="id"]');
-                        if (idInput) {
-                            offer.id = idInput.value;
-                        }
-                    }
-                    
-                    // Verkaufsressource und -menge bestimmen (Erhalte)
-                    if (cells[0].querySelector('.icon.header.wood')) {
-                        offer.sellResource = 'wood';
-                    } else if (cells[0].querySelector('.icon.header.stone')) {
-                        offer.sellResource = 'stone';
-                    } else if (cells[0].querySelector('.icon.header.iron')) {
-                        offer.sellResource = 'iron';
-                    }
-                    
-                    // Verkaufsmenge extrahieren
-                    const sellText = cells[0].textContent.trim();
-                    offer.sellAmount = parseInt(sellText.replace(/\D/g, '')) || 0;
-                    
-                    // Kaufressource und -menge bestimmen (Für)
-                    if (cells[1].querySelector('.icon.header.wood')) {
-                        offer.buyResource = 'wood';
-                    } else if (cells[1].querySelector('.icon.header.stone')) {
-                        offer.buyResource = 'stone';
-                    } else if (cells[1].querySelector('.icon.header.iron')) {
-                        offer.buyResource = 'iron';
-                    }
-                    
-                    // Kaufmenge extrahieren
-                    const buyText = cells[1].textContent.trim();
-                    offer.buyAmount = parseInt(buyText.replace(/\D/g, '')) || 0;
-                    
-                    // Spieler-Information (optional)
-                    if (cells[2]) {
-                        offer.village = cells[2].textContent.trim();
-                    }
-                    
-                    // Dauer extrahieren
-                    if (cells[3]) {
-                        offer.travelTime = cells[3].textContent.trim();
-                        
-                        // Dauer in Minuten umrechnen für Sortierung
-                        const timeParts = offer.travelTime.split(':');
-                        if (timeParts.length === 2) {
-                            const hours = parseInt(timeParts[0]) || 0;
-                            const minutes = parseInt(timeParts[1]) || 0;
-                            offer.distance = hours * 60 + minutes;
-                        }
-                    }
-                    
-                    // Verhältnis extrahieren
-                    if (cells[4]) {
-                        // Das Verhältnis ist normalerweise 1, aber wir berechnen es selbst
-                        if (offer.sellAmount > 0 && offer.buyAmount > 0) {
-                            offer.ratio = offer.buyAmount / offer.sellAmount;
-                        }
-                    }
-                    
-                    // Verfügbarkeit extrahieren (optional)
-                    if (cells[5]) {
-                        const availabilityText = cells[5].textContent.trim();
-                        const availabilityMatch = availabilityText.match(/(\d+)/);
-                        if (availabilityMatch) {
-                            offer.availability = parseInt(availabilityMatch[1]) || 1;
-                        } else {
-                            offer.availability = 1;
-                        }
-                    }
-                    
-                    // Annehmen-Button speichern
-                    if (cells[6]) {
-                        const acceptButton = cells[6].querySelector('input[type="submit"]');
-                        if (acceptButton) {
-                            offer.actionButton = acceptButton;
-                        }
-                        
-                        // Formular speichern für spätere Interaktion
-                        const form = cells[6].querySelector('form.market_accept_offer');
-                        if (form) {
-                            offer.acceptForm = form;
-                        }
-                    }
-                    
-                    // Nur gültige Angebote hinzufügen
-                    if (offer.sellResource && offer.buyResource && offer.sellAmount > 0 && offer.buyAmount > 0) {
-                        offers.push(offer);
-                    }
+                if (!cells || cells.length < 5) return;
+
+                // Häufige Struktur (andere Angebote):
+                // [0]=icon sellRes, [1]=sellAmount, [2]=icon buyRes, [3]=buyAmount, [4]=Dorf, [5]=Zeit, [6]=Aktion
+                let sellIconCell = cells[0], sellAmountCell = cells[1],
+                    buyIconCell  = cells[2], buyAmountCell  = cells[3],
+                    metaCell     = cells[4], timeCell      = cells[5],
+                    actionCell   = cells[6] || cells[cells.length - 1];
+
+                // Fallback auf ältere/abweichende Layouts
+                if (!sellIconCell.querySelector('.wood, .stone, .iron') &&
+                    (cells.length >= 7)) {
+                    // alter Parser bleibt als Fallback bestehen
+                    sellIconCell = cells[0];
+                    sellAmountCell = cells[1] || cells[0];
+                    buyIconCell = cells[2] || cells[1];
+                    buyAmountCell = cells[3] || cells[2];
+                    metaCell = cells[4] || null;
+                    timeCell = cells[5] || null;
+                    actionCell = cells[6] || cells[cells.length - 1];
                 }
+
+                const resFromCell = (c) => {
+                    if (!c) return '';
+                    if (c.querySelector('.wood, .icon.header.wood')) return 'wood';
+                    if (c.querySelector('.stone, .icon.header.stone')) return 'stone';
+                    if (c.querySelector('.iron, .icon.header.iron')) return 'iron';
+                    return '';
+                };
+
+                const sellResource = resFromCell(sellIconCell);
+                const buyResource  = resFromCell(buyIconCell);
+                const sellAmount = parseInt((sellAmountCell?.textContent || '').replace(/\D/g, ''), 10) || 0;
+                const buyAmount  = parseInt((buyAmountCell?.textContent  || '').replace(/\D/g, ''), 10) || 0;
+
+                if (!sellResource || !buyResource || sellAmount <= 0 || buyAmount <= 0) return;
+
+                const offer = {
+                    id: '',
+                    sellResource,
+                    sellAmount,
+                    buyResource,
+                    buyAmount,
+                    ratio: buyAmount / sellAmount, // Kosten pro 1 Einheit verkaufter Ressource
+                    village: metaCell ? metaCell.textContent.trim() : '',
+                    distance: 0,
+                    travelTime: timeCell ? timeCell.textContent.trim() : '',
+                    availability: 1,
+                    actionButton: null,
+                    acceptForm: null,
+                    timestamp: Date.now()
+                };
+
+                // Formular/Action finden
+                const form = row.querySelector('form.market_accept_offer') || actionCell?.querySelector('form');
+                if (form) {
+                    offer.acceptForm = form;
+                    offer.actionButton = form.querySelector('input[type=\"submit\"],button[type=\"submit\"]');
+                    const idInput = form.querySelector('input[name=\"id\"]');
+                    if (idInput) offer.id = idInput.value;
+                } else if (actionCell) {
+                    offer.actionButton = actionCell.querySelector('a, input[type=\"submit\"]');
+                }
+
+                offers.push(offer);
             });
-            
+
             log(`${offers.length} Marktangebote extrahiert`);
         } catch (error) {
-            logError("Fehler beim Extrahieren der Marktangebote", error);
+            logError(\"Fehler beim Extrahieren der Marktangebote\", error);
         }
         return offers;
     }
@@ -494,41 +428,30 @@
     
     /**
      * Berechnet die besten aktuellen Kauf- und Verkaufspreise
+     * sell[res] = bestes (höchstes) Verhältnis, wenn WIR diese Ressource verkaufen
+     * buy[res]  = günstigstes (kleinstes) Verhältnis, wenn WIR diese Ressource kaufen
      */
     function calculateBestPrices() {
-        // Zurücksetzen der besten Preise
-        marketCache.bestPrices = {
-            buy: { wood: 0, stone: 0, iron: 0 },
-            sell: { wood: 0, stone: 0, iron: 0 }
-        };
-        
-        // Durchlaufe alle Angebote
-        marketCache.offers.forEach(offer => {
-            // Kaufpreis (was andere verkaufen)
-            const buyRatio = offer.sellAmount / offer.buyAmount;
-            if (buyRatio > 0) {
-                if (offer.sellResource === 'wood' && (marketCache.bestPrices.buy.wood === 0 || buyRatio > marketCache.bestPrices.buy.wood)) {
-                    marketCache.bestPrices.buy.wood = buyRatio;
-                } else if (offer.sellResource === 'stone' && (marketCache.bestPrices.buy.stone === 0 || buyRatio > marketCache.bestPrices.buy.stone)) {
-                    marketCache.bestPrices.buy.stone = buyRatio;
-                } else if (offer.sellResource === 'iron' && (marketCache.bestPrices.buy.iron === 0 || buyRatio > marketCache.bestPrices.buy.iron)) {
-                    marketCache.bestPrices.buy.iron = buyRatio;
-                }
-            }
-            
-            // Verkaufspreis (was andere kaufen)
-            const sellRatio = offer.buyAmount / offer.sellAmount;
-            if (sellRatio > 0) {
-                if (offer.buyResource === 'wood' && (marketCache.bestPrices.sell.wood === 0 || sellRatio > marketCache.bestPrices.sell.wood)) {
-                    marketCache.bestPrices.sell.wood = sellRatio;
-                } else if (offer.buyResource === 'stone' && (marketCache.bestPrices.sell.stone === 0 || sellRatio > marketCache.bestPrices.sell.stone)) {
-                    marketCache.bestPrices.sell.stone = sellRatio;
-                } else if (offer.buyResource === 'iron' && (marketCache.bestPrices.sell.iron === 0 || sellRatio > marketCache.bestPrices.sell.iron)) {
-                    marketCache.bestPrices.sell.iron = sellRatio;
-                }
-            }
+        const bestSell = { wood: 0, stone: 0, iron: 0 };
+        const bestBuy  = { wood: Infinity, stone: Infinity, iron: Infinity };
+
+        marketCache.offers.forEach(o => {
+            if (!o || !o.sellResource || !o.buyResource || o.sellAmount <= 0) return;
+            const ratio = o.buyAmount / o.sellAmount; // Preis pro 1 Einheit sellResource
+
+            // Verkaufen: wir verkaufen 'sellResource' – je höher ratio, desto besser
+            if (ratio > bestSell[o.sellResource]) bestSell[o.sellResource] = ratio;
+
+            // Kaufen: wir kaufen 'sellResource' – je kleiner ratio, desto günstiger
+            if (ratio < bestBuy[o.sellResource]) bestBuy[o.sellResource] = ratio;
         });
-        
+
+        marketCache.bestPrices.sell = bestSell;
+        marketCache.bestPrices.buy = {
+            wood: bestBuy.wood === Infinity ? 0 : bestBuy.wood,
+            stone: bestBuy.stone === Infinity ? 0 : bestBuy.stone,
+            iron: bestBuy.iron === Infinity ? 0 : bestBuy.iron
+        };
         log("Beste Preise berechnet");
     }
     
@@ -827,7 +750,8 @@
                     padding: 10px;
                     color: #ecf0f1;
                     font-size: 12px;
-                    z-index: 9999;
+                    z-index: 2147483647;      /* immer oberste Ebene */
+                    overscroll-behavior: contain; /* verhindert Scroll-Bubbling */
                     width: 300px;
                     max-height: 500px;
                     overflow-y: auto;
@@ -855,16 +779,10 @@
                     padding: 5px 10px;
                     border-radius: 3px;
                     cursor: pointer;
-                    transition: background-color 0.2s ease;
                 }
                 
                 #twMarketBot button:hover {
                     background: #3498db;
-                }
-                
-                #twMarketBot button:active {
-                    background: #1c6ea4;
-                    transform: translateY(1px);
                 }
                 
                 #twMarketBot button.active {
@@ -889,13 +807,6 @@
                 #twMarketBot .section-title {
                     font-weight: bold;
                     margin-bottom: 5px;
-                    cursor: pointer;
-                    user-select: none;
-                    transition: color 0.2s ease;
-                }
-                
-                #twMarketBot .section-title:hover {
-                    color: #3498db;
                 }
                 
                 #twMarketBot .resource-info {
@@ -937,30 +848,16 @@
                 }
                 
                 #twMarketBot .log {
-                    max-height: 150px;
-                    overflow-y: auto !important;
+                    height: 140px;
+                    max-height: 140px;
+                    overflow-y: auto;
                     background: rgba(0, 0, 0, 0.2);
                     padding: 5px;
                     border-radius: 3px;
                     margin-top: 10px;
                     font-family: monospace;
                     font-size: 10px;
-                    scrollbar-width: thin;
-                    scrollbar-color: #34495e rgba(0, 0, 0, 0.2);
-                }
-                
-                #twMarketBot .log::-webkit-scrollbar {
-                    width: 8px;
-                }
-                
-                #twMarketBot .log::-webkit-scrollbar-track {
-                    background: rgba(0, 0, 0, 0.2);
-                    border-radius: 3px;
-                }
-                
-                #twMarketBot .log::-webkit-scrollbar-thumb {
-                    background-color: #34495e;
-                    border-radius: 3px;
+                    pointer-events: auto;  /* Scrollbar immer bedienbar */
                 }
                 
                 #twMarketBot .toggle-section {
@@ -1011,64 +908,6 @@
                 
                 #twMarketBot.minimized .bot-icon {
                     display: block;
-                }
-                
-                #twMarketBot .stats-container {
-                    background: rgba(0, 0, 0, 0.2);
-                    padding: 8px;
-                    border-radius: 3px;
-                    margin-top: 5px;
-                }
-                
-                #twMarketBot .stats-row {
-                    display: flex;
-                    justify-content: space-between;
-                    margin-bottom: 3px;
-                }
-                
-                #twMarketBot .stats-label {
-                    flex: 2;
-                }
-                
-                #twMarketBot .stats-value {
-                    flex: 1;
-                    text-align: right;
-                    font-weight: bold;
-                }
-                
-                #twMarketBot .highlight {
-                    color: #2ecc71;
-                    font-weight: bold;
-                }
-                
-                #twMarketBot .error-text {
-                    color: #e74c3c;
-                }
-                
-                #twMarketBot #logSection {
-                    display: block;
-                    max-height: 150px;
-                    overflow-y: auto !important;
-                }
-                
-                #twMarketBot #logSection.collapsed {
-                    display: none;
-                }
-                
-                #twMarketBot #settingsSection {
-                    display: block;
-                }
-                
-                #twMarketBot #settingsSection.collapsed {
-                    display: none;
-                }
-                
-                #twMarketBot #statsSection {
-                    display: block;
-                }
-                
-                #twMarketBot #statsSection.collapsed {
-                    display: none;
                 }
             `);
             
@@ -1142,6 +981,29 @@
                         </div>
                     </div>
                     
+                    <!-- Statistik-Sektion -->
+                    <div class="section">
+                      <div class="section-title toggle-section collapsed" data-section="stats">Statistik</div>
+                      <div class="section-content collapsed" id="statsSection">
+                          <div class="settings-row">
+                              <div class="settings-label">Abgeschlossene Trades:</div>
+                              <div class="settings-value" id="twMarketBotTradesCompleted">0</div>
+                          </div>
+                          <div class="settings-row">
+                              <div class="settings-label">Gehandelt (Holz/Lehm/Eisen):</div>
+                              <div class="settings-value">
+                                  <span id="twMarketBotTradedWood">0</span> /
+                                  <span id="twMarketBotTradedStone">0</span> /
+                                  <span id="twMarketBotTradedIron">0</span>
+                              </div>
+                          </div>
+                          <div class="settings-row">
+                              <div class="settings-label">Fehler (letzte 3):</div>
+                              <div class="settings-value" id="twMarketBotLastErrors">-</div>
+                          </div>
+                      </div>
+                    </div>
+                    
                     <div class="section">
                         <div class="section-title toggle-section collapsed" data-section="settings">Einstellungen</div>
                         <div class="section-content collapsed" id="settingsSection">
@@ -1180,34 +1042,6 @@
                     </div>
                     
                     <div class="section">
-                        <div class="section-title toggle-section collapsed" data-section="stats">Statistik</div>
-                        <div class="section-content collapsed" id="statsSection">
-                            <div class="stats-container">
-                                <div class="stats-row">
-                                    <div class="stats-label">Abgeschlossene Trades:</div>
-                                    <div class="stats-value" id="twMarketBotTradesCompleted">0</div>
-                                </div>
-                                <div class="stats-row">
-                                    <div class="stats-label">Holz gehandelt:</div>
-                                    <div class="stats-value" id="twMarketBotWoodTraded">0</div>
-                                </div>
-                                <div class="stats-row">
-                                    <div class="stats-label">Lehm gehandelt:</div>
-                                    <div class="stats-value" id="twMarketBotStoneTraded">0</div>
-                                </div>
-                                <div class="stats-row">
-                                    <div class="stats-label">Eisen gehandelt:</div>
-                                    <div class="stats-value" id="twMarketBotIronTraded">0</div>
-                                </div>
-                                <div class="stats-row">
-                                    <div class="stats-label">Generierter Gewinn:</div>
-                                    <div class="stats-value" id="twMarketBotProfit">0</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="section">
                         <div class="section-title toggle-section collapsed" data-section="log">Log</div>
                         <div class="section-content collapsed log" id="logSection">
                             <div id="twMarketBotLog"></div>
@@ -1222,108 +1056,9 @@
             // Event-Listener für UI-Elemente
             setupUIEventListeners();
             
-            // Füge initiale Log-Nachricht hinzu
-            addToUILog("Bot gestartet. Bereit für Handel.");
-            
             log("UI erstellt");
         } catch (error) {
             logError("Fehler beim Erstellen der UI", error);
-        }
-    }
-    
-    /**
-     * Zeigt die Einstellungen an
-     */
-    function showSettings() {
-        try {
-            // Setze den aktiven Bereich
-            uiState.activeSection = 'settings';
-            
-            // Alle Bereiche ausblenden
-            hideAllSections();
-            
-            // Einstellungen anzeigen
-            const settingsSection = document.getElementById('settingsSection');
-            const settingsTitle = document.querySelector('.toggle-section[data-section="settings"]');
-            
-            if (settingsSection && settingsTitle) {
-                settingsSection.classList.remove('collapsed');
-                settingsTitle.classList.remove('collapsed');
-                
-                // Scroll zum Einstellungsbereich
-                settingsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                
-                log("Einstellungen angezeigt");
-            } else {
-                logError("Einstellungsbereich nicht gefunden", new Error("DOM Element nicht gefunden"));
-            }
-        } catch (error) {
-            logError("Fehler beim Anzeigen der Einstellungen", error);
-        }
-    }
-    
-    /**
-     * Zeigt die Statistik an
-     */
-    function showStats() {
-        try {
-            // Setze den aktiven Bereich
-            uiState.activeSection = 'stats';
-            
-            // Alle Bereiche ausblenden
-            hideAllSections();
-            
-            // Statistik anzeigen
-            const statsSection = document.getElementById('statsSection');
-            const statsTitle = document.querySelector('.toggle-section[data-section="stats"]');
-            
-            if (statsSection && statsTitle) {
-                statsSection.classList.remove('collapsed');
-                statsTitle.classList.remove('collapsed');
-                
-                // Aktualisiere die Statistik-Werte
-                document.getElementById('twMarketBotTradesCompleted').textContent = stats.tradesCompleted.toLocaleString();
-                document.getElementById('twMarketBotWoodTraded').textContent = stats.resourcesTraded.wood.toLocaleString();
-                document.getElementById('twMarketBotStoneTraded').textContent = stats.resourcesTraded.stone.toLocaleString();
-                document.getElementById('twMarketBotIronTraded').textContent = stats.resourcesTraded.iron.toLocaleString();
-                document.getElementById('twMarketBotProfit').textContent = stats.profitGenerated.toLocaleString();
-                
-                // Scroll zum Statistikbereich
-                statsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                
-                log("Statistik angezeigt");
-            } else {
-                logError("Statistikbereich nicht gefunden", new Error("DOM Element nicht gefunden"));
-            }
-        } catch (error) {
-            logError("Fehler beim Anzeigen der Statistik", error);
-        }
-    }
-    
-    /**
-     * Blendet alle Sektionen aus
-     */
-    function hideAllSections() {
-        try {
-            // Alle Sections ausblenden, außer Ressourcen und Marktpreise
-            const sections = ['settings', 'stats', 'log'];
-            
-            sections.forEach(section => {
-                const sectionElement = document.getElementById(`${section}Section`);
-                const titleElement = document.querySelector(`.toggle-section[data-section="${section}"]`);
-                
-                if (sectionElement) {
-                    sectionElement.classList.add('collapsed');
-                }
-                
-                if (titleElement) {
-                    titleElement.classList.add('collapsed');
-                }
-            });
-            
-            log("Alle Sektionen ausgeblendet");
-        } catch (error) {
-            logError("Fehler beim Ausblenden aller Sektionen", error);
         }
     }
     
@@ -1332,13 +1067,10 @@
      */
     function setupUIEventListeners() {
         try {
-            console.log("[TW Market Bot] Richte UI-Event-Listener ein...");
-            
             // Toggle-Button
             const toggleButton = document.getElementById('twMarketBotToggle');
             if (toggleButton) {
                 toggleButton.addEventListener('click', () => {
-                    console.log("[TW Market Bot] Toggle-Button geklickt");
                     CONFIG.enabled = !CONFIG.enabled;
                     toggleButton.className = CONFIG.enabled ? 'active' : 'disabled';
                     toggleButton.textContent = CONFIG.enabled ? 'Aktiviert' : 'Deaktiviert';
@@ -1346,37 +1078,38 @@
                     saveData('twMarketBotConfig', CONFIG);
                     log(`Bot ${CONFIG.enabled ? 'aktiviert' : 'deaktiviert'}`);
                 });
-            } else {
-                console.error("[TW Market Bot] Toggle-Button nicht gefunden");
             }
             
-            // Einstellungen-Button
-            const settingsButton = document.getElementById('twMarketBotSettings');
-            if (settingsButton) {
-                settingsButton.addEventListener('click', () => {
-                    console.log("[TW Market Bot] Einstellungen-Button geklickt");
-                    showSettings();
-                });
-            } else {
-                console.error("[TW Market Bot] Einstellungen-Button nicht gefunden");
+            // -------------------------------------------------------------
+            //  Zusätzliche Buttons: Einstellungen & Statistik
+            // -------------------------------------------------------------
+
+            // Öffnet eine Section (Header + Content) und scrollt hin
+            function openSection(sectionName) {
+                const header  = document.querySelector(`.toggle-section[data-section="${sectionName}"]`);
+                const content = document.getElementById(`${sectionName}Section`);
+                if (!header || !content) return;
+                header.classList.remove('collapsed');
+                content.classList.remove('collapsed');
+                content.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
-            
-            // Statistik-Button
-            const statsButton = document.getElementById('twMarketBotStats');
-            if (statsButton) {
-                statsButton.addEventListener('click', () => {
-                    console.log("[TW Market Bot] Statistik-Button geklickt");
-                    showStats();
-                });
-            } else {
-                console.error("[TW Market Bot] Statistik-Button nicht gefunden");
+
+            // "Einstellungen" Button
+            const settingsBtn = document.getElementById('twMarketBotSettings');
+            if (settingsBtn) {
+                settingsBtn.addEventListener('click', () => openSection('settings'));
             }
-            
+
+            // "Statistik" Button
+            const statsBtn = document.getElementById('twMarketBotStats');
+            if (statsBtn) {
+                statsBtn.addEventListener('click', () => openSection('stats'));
+            }
+
             // Einstellungen speichern
             const saveSettingsButton = document.getElementById('twMarketBotSaveSettings');
             if (saveSettingsButton) {
                 saveSettingsButton.addEventListener('click', () => {
-                    console.log("[TW Market Bot] Speichern-Button geklickt");
                     // Einstellungen aus UI-Elementen auslesen
                     CONFIG.minProfitPercentage = parseInt(document.getElementById('twMarketBotMinProfit').value) || 15;
                     CONFIG.maxResourceStock = parseInt(document.getElementById('twMarketBotMaxResources').value) || 25000;
@@ -1387,50 +1120,18 @@
                     // Einstellungen speichern
                     saveData('twMarketBotConfig', CONFIG);
                     log("Einstellungen gespeichert");
-                    
-                    // Visuelles Feedback
-                    saveSettingsButton.textContent = "Gespeichert!";
-                    saveSettingsButton.style.background = "#27ae60";
-                    
-                    // Nach kurzer Zeit zurücksetzen
-                    setTimeout(() => {
-                        saveSettingsButton.textContent = "Speichern";
-                        saveSettingsButton.style.background = "";
-                    }, 1500);
                 });
-            } else {
-                console.error("[TW Market Bot] Speichern-Button nicht gefunden");
             }
             
             // Toggle-Sections
             const toggleSections = document.querySelectorAll('.toggle-section');
             toggleSections.forEach(section => {
-                section.addEventListener('click', (event) => {
+                section.addEventListener('click', () => {
                     const sectionName = section.getAttribute('data-section');
-                    console.log(`[TW Market Bot] Section ${sectionName} geklickt`);
-                    
                     const content = document.getElementById(`${sectionName}Section`);
                     
-                    if (content) {
-                        // Toggle-Klasse umschalten
-                        section.classList.toggle('collapsed');
-                        content.classList.toggle('collapsed');
-                        
-                        // Wenn der Bereich geöffnet wird, scrolle dorthin
-                        if (!content.classList.contains('collapsed')) {
-                            content.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                            
-                            // Wenn es der Log-Bereich ist, scrolle zum Ende
-                            if (sectionName === 'log') {
-                                content.scrollTop = content.scrollHeight;
-                            }
-                        }
-                    } else {
-                        console.error(`[TW Market Bot] Section ${sectionName} nicht gefunden`);
-                    }
-                    
-                    // Verhindern, dass das Ereignis weitergeleitet wird
-                    event.stopPropagation();
+                    section.classList.toggle('collapsed');
+                    content.classList.toggle('collapsed');
                 });
             });
             
@@ -1440,27 +1141,18 @@
             
             if (minimizeButton) {
                 minimizeButton.addEventListener('click', () => {
-                    console.log("[TW Market Bot] Minimieren-Button geklickt");
                     document.getElementById('twMarketBot').classList.add('minimized');
-                    uiState.isMinimized = true;
                 });
-            } else {
-                console.error("[TW Market Bot] Minimieren-Button nicht gefunden");
             }
             
             if (botIcon) {
                 botIcon.addEventListener('click', () => {
-                    console.log("[TW Market Bot] Bot-Icon geklickt");
                     document.getElementById('twMarketBot').classList.remove('minimized');
-                    uiState.isMinimized = false;
                 });
-            } else {
-                console.error("[TW Market Bot] Bot-Icon nicht gefunden");
             }
             
             log("UI-Event-Listener eingerichtet");
         } catch (error) {
-            console.error("[TW Market Bot] Kritischer Fehler bei Event-Listener Setup:", error);
             logError("Fehler beim Einrichten der UI-Event-Listener", error);
         }
     }
@@ -1496,15 +1188,25 @@
             document.getElementById('twMarketBotSessionActions').textContent = stats.sessionActions;
             document.getElementById('twMarketBotMaxActions').textContent = CONFIG.maxActionsPerSession;
             
-            // Wenn Statistik sichtbar ist, aktualisiere auch diese
-            if (!document.getElementById('statsSection').classList.contains('collapsed')) {
-                document.getElementById('twMarketBotTradesCompleted').textContent = stats.tradesCompleted.toLocaleString();
-                document.getElementById('twMarketBotWoodTraded').textContent = stats.resourcesTraded.wood.toLocaleString();
-                document.getElementById('twMarketBotStoneTraded').textContent = stats.resourcesTraded.stone.toLocaleString();
-                document.getElementById('twMarketBotIronTraded').textContent = stats.resourcesTraded.iron.toLocaleString();
-                document.getElementById('twMarketBotProfit').textContent = stats.profitGenerated.toLocaleString();
+            // -----------------------------------------------------------------
+            // Statistik aktualisieren
+            // -----------------------------------------------------------------
+            const tCompleted = document.getElementById('twMarketBotTradesCompleted');
+            if (tCompleted) tCompleted.textContent = stats.tradesCompleted.toLocaleString();
+
+            const tWood  = document.getElementById('twMarketBotTradedWood');
+            const tStone = document.getElementById('twMarketBotTradedStone');
+            const tIron  = document.getElementById('twMarketBotTradedIron');
+            if (tWood)  tWood.textContent  = stats.resourcesTraded.wood.toLocaleString();
+            if (tStone) tStone.textContent = stats.resourcesTraded.stone.toLocaleString();
+            if (tIron)  tIron.textContent  = stats.resourcesTraded.iron.toLocaleString();
+
+            const lastErrorsEl = document.getElementById('twMarketBotLastErrors');
+            if (lastErrorsEl) {
+                const last3 = (stats.errors || []).slice(-3).map(e => e.message).join(' | ');
+                lastErrorsEl.textContent = last3 || '-';
             }
-            
+
             log("UI aktualisiert");
         } catch (error) {
             logError("Fehler beim Aktualisieren der UI", error);
@@ -1522,43 +1224,17 @@
                 const timestamp = new Date().toLocaleTimeString();
                 const logEntry = document.createElement('div');
                 logEntry.textContent = `[${timestamp}] ${message}`;
-                
-                // Fehler-Nachrichten hervorheben
-                if (message.includes("Fehler")) {
-                    logEntry.classList.add('error-text');
-                }
-                
-                // Erfolgs-Nachrichten hervorheben
-                if (message.includes("erfolgreich")) {
-                    logEntry.classList.add('highlight');
-                }
-                
                 logElement.appendChild(logEntry);
-                
-                // Scroll zum Ende
-                logElement.scrollTop = logElement.scrollHeight;
-                
-                // Begrenze die Anzahl der Log-Einträge
-                while (logElement.children.length > 50) {
-                    logElement.removeChild(logElement.firstChild);
-                }
-                
-                // Wenn der Log-Bereich nicht sichtbar ist, füge einen visuellen Hinweis hinzu
-                const logSection = document.getElementById('logSection');
-                const logTitle = document.querySelector('.toggle-section[data-section="log"]');
-                
-                if (logSection && logSection.classList.contains('collapsed') && logTitle) {
-                    // Kurzes Blinken des Log-Titels
-                    logTitle.style.color = '#3498db';
-                    setTimeout(() => {
-                        logTitle.style.color = '';
-                    }, 500);
-                }
-            } else {
-                console.error("[TW Market Bot] Log-Element nicht gefunden");
+            // Immer ans Ende scrollen
+            logElement.scrollTop = logElement.scrollHeight;
+
+            // Einträge begrenzen (erhöht auf 200 für ausführlicheres Debugging)
+            while (logElement.children.length > 200) {
+                logElement.removeChild(logElement.firstChild);
+            }
             }
         } catch (error) {
-            console.error("[TW Market Bot] Fehler beim Hinzufügen zum UI-Log:", error);
+            console.error("Fehler beim Hinzufügen zum UI-Log:", error);
         }
     }
     
@@ -1625,9 +1301,12 @@
      * @returns {boolean} - true, wenn die aktuelle Seite die Marktplatz-Angebotsseite ist
      */
     function isMarketOfferPage() {
-        return window.location.href.includes('screen=market') && 
-               (window.location.href.includes('mode=other_offer') || 
-                !window.location.href.includes('mode='));
+        // Erkenne "andere Angebote" korrekt (mode=other_offers) und
+        // fallback, falls direkt eine Angebots-Tabelle vorhanden ist.
+        return isMarketPage() && (
+            window.location.href.includes('mode=other_offers') ||
+            document.querySelector('#market_offer_table')
+        );
     }
     
     /**
