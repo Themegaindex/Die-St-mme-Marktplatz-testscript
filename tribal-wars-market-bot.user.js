@@ -22,6 +22,17 @@
 // @match        *://*.plemena.net/*
 // @match        *://*.tribalwars.ae/*
 // @match        *://*.tribalwars.works/*
+// -------------------------------------------------------------------------
+//  OPTIONAL ADVANCED FEATURES
+// -------------------------------------------------------------------------
+//  Um die erweiterten Handels- und Anti-Detection-Funktionen zu aktivieren,
+//  entferne einfach die Kommentarzeichen in der folgenden Zeile. Tampermonkey
+//  lädt dann automatisch das Erweiterungs-Script von GitHub.
+//
+//  Hinweis:  Bei lokalen Tests kannst du stattdessen eine lokale Datei
+//            verwenden, z. B.  // @require file://C:/Pfad/zu/tribal-wars-market-extensions.js
+//
+// @require     https://raw.githubusercontent.com/Themegaindex/Die-St-mme-Marktplatz-testscript/main/tribal-wars-market-extensions.js
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
