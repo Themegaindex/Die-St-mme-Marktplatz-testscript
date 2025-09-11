@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Tribal Wars Market Extensions (DE tuned, native nav + accept + own offer)
 // @namespace    https://github.com/Themegaindex/Die-St-mme-Marktplatz-testscript
-// @version      1.5.1
-// @description  Navigation (native click/hard reload), Angebotsparser, Filter, Pagination, Accept via form.submit(), Own-Offer Creator, Min-Limit-Schutz, Versionsanzeige für den Bot.
+// @version      1.6.0
+// @description  Navigation (native click/hard reload), Angebotsparser, Filter, Pagination, Accept via form.submit(), Own-Offer Creator, Min-Limit-Schutz, Versionsanzeige für den Bot; vermeidet Simulations-Clicks und Fake-Erfolge konsequent.
 // @author       Themegaindex
 // @match        *://*.die-staemme.de/*
 // @grant        none
@@ -11,13 +11,10 @@
 
 (function () {
   'use strict';
-  const VERSION = '1.5.1';
-
-  // ---- Logging → Bot-UI ----
+  const VERSION = '1.6.0';
   function log(msg){ if (window.twMarketBotLog) window.twMarketBotLog(msg); else console.log('[TW Market Ext]', msg); }
   function logError(m,e){ if (window.twMarketBotLogError) window.twMarketBotLogError(m,e); else console.error('[TW Market Ext] '+m,e); }
 
-  // Helper
   const isMarketPage = () => location.href.includes('screen=market');
   function getCurrentMarketTab() {
     const u = location.href;
@@ -44,14 +41,9 @@
     });
   }
 
-  // ------------- Navigation -------------
-  // Rückgabe:
-  // true  → Tab aktiv (und Tabelle i.d.R. vorhanden),
-  // false → Fehler (Link nicht gefunden),
-  // null  → Hard-Navigation ausgelöst (location.href gesetzt)
+  // Navigation: true=Tab aktiv, false=Fehler, null=Hard-Navigation ausgelöst
   async function navigateToMarketTab(tab){
     try{
-      // Auf Markt wechseln
       if(!isMarketPage()){
         const a = document.querySelector('a[href*="screen=market"]');
         if(!a){ logError('Market-Link nicht gefunden', new Error('nav')); return false; }
@@ -59,12 +51,8 @@
         const ok = await waitFor(()=> isMarketPage(), 100, 60);
         if(!ok) { location.href = a.href; return null; }
       }
-      // Bereits auf gewünschtem Tab?
-      if(getCurrentMarketTab() === tab){
-        return true;
-      }
+      if(getCurrentMarketTab() === tab){ return true; }
 
-      // Tab anklicken
       const tabLink = document.querySelector(`#id_${tab} a, a[href*="mode=${tab}"]`);
       if(!tabLink){ logError('Tab-Link nicht gefunden: '+tab, new Error('nav')); return false; }
 
@@ -72,14 +60,11 @@
       const ok = await waitFor(()=> getCurrentMarketTab() === tab, 100, 40);
       if(ok){ return true; }
 
-      // Hard reload als Fallback
       location.href = tabLink.href;
       return null;
-
     }catch(e){ logError('Fehler bei navigateToMarketTab', e); return false; }
   }
 
-  // ------------- Angebote parsen -------------
   function findOffersTable(){
     const tables = Array.from(document.querySelectorAll('table.vis'));
     for(const tbl of tables){
@@ -155,7 +140,6 @@
     }catch(e){ logError('Error extracting detailed market offers', e); return []; }
   }
 
-  // ------------- Pagination -------------
   function getPaginationContainer(){
     const tds = Array.from(document.querySelectorAll('td[align="center"]'));
     return tds.find(td => td.querySelector('a.paged-nav-item') || td.querySelector('strong')) || null;
@@ -183,7 +167,6 @@
     return next || null;
   }
 
-  // ------------- Filter -------------
   function findBestMarketOffers(offers, criteria){
     try{
       if(!offers?.length) return [];
@@ -200,7 +183,7 @@
         maxTravelMinutes:24*60,
         requireAcceptable:true,
         prioritizeBy:'ratio',
-        minAfterPay: Math.floor(lim.min * 0.9)
+        minAfterPay: Math.floor((lim.min || 0) * 0.9)
       }, criteria || {});
 
       let filtered = offers.filter(o=>{
@@ -218,7 +201,6 @@
           if(after < c.minAfterPay) return false;
           return (v.resources[pay] || 0) >= o.buyAmount;
         }else{
-          // verkaufen: Wir geben c.resource ab (als "Für")
           if(o.buyResource !== c.resource) return false;
           if(o.buyAmount < c.minAmount || o.buyAmount > c.maxAmount) return false;
           if(o.ratio < c.minRatio || o.ratio > c.maxRatio) return false;
@@ -262,7 +244,6 @@
     }catch(e){ logError('Error in pagination scan', e); return []; }
   }
 
-  // ------------- Accept -------------
   async function acceptMarketOffer(offer, opts={}){
     try{
       if(!offer?.acceptForm){ logError('Cannot accept: no form', new Error('Invalid offer')); return { submitted:false }; }
@@ -276,7 +257,7 @@
 
       if(typeof opts.maxCount === 'number') count = Math.min(count, opts.maxCount);
 
-      const minAfterPay = Math.floor((opts.respectMinAfterPay ? lim.min : 0) * 0.9);
+      const minAfterPay = Math.floor((opts.respectMinAfterPay ? (lim.min || 0) : 0) * 0.9);
       if(((v.resources[offer.buyResource] || 0) - offer.buyAmount*count) < minAfterPay){
         count = Math.floor(((v.resources[offer.buyResource] || 0) - minAfterPay) / offer.buyAmount);
       }
@@ -285,24 +266,21 @@
       const countInput = offer.acceptForm.querySelector('input[name="count"]');
       if(countInput){ countInput.value = String(count); }
 
-      // Echtes Submit
       offer.acceptForm.submit();
       log(`Offer submitted (x${count})`);
       return { submitted:true, count };
     }catch(e){ logError('Error accepting offer', e); return { submitted:false }; }
   }
 
-  // ------------- Eigenes Angebot anlegen (1:1) -------------
   async function createOwnOffer({ sellRes, buyRes, amountPerOffer, count=1, maxHours=5 }){
     try{
-      // Wir müssen uns auf dem own_offer-Tab befinden
       const nav = await navigateToMarketTab('own_offer');
       if(nav !== true) return { submitted:false };
 
       const form = document.querySelector('form#own_offer_form');
       if(!form){ logError('own_offer_form nicht gefunden', new Error('form')); return { submitted:false }; }
 
-      // 1:1 – auf deiner Welt sind nur 1:1 erlaubt (steht im HTML „Angebote ... 1 und 1“)
+      // 1:1 – Welt-Regel (laut UI-Hinweis)
       const sellInput = form.querySelector('input[name="sell"]');
       const buyInput  = form.querySelector('input[name="buy"]');
       const sellRadio = form.querySelector(`#res_sell_${sellRes}`);
@@ -318,7 +296,6 @@
       buyRadio.checked  = true;
       sellInput.value = String(amountPerOffer);
       buyInput.value  = String(amountPerOffer);
-
       if(multi){ multi.value = String(Math.max(1, Math.floor(count))); }
       if(maxTime){ maxTime.value = String(maxHours); }
 
@@ -328,7 +305,6 @@
     }catch(e){ logError('Error creating own offer', e); return { submitted:false }; }
   }
 
-  // Export – überschreibt bewusst alte Versionen
   window.twMarketExtensions = {
     __version: VERSION,
     navigateToMarketTab,
@@ -342,6 +318,5 @@
     createOwnOffer
   };
 
-  // Version in UI loggen
   log('Market Extensions v' + VERSION + ' geladen');
 })();
