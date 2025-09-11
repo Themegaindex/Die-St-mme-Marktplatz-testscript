@@ -1,27 +1,10 @@
 // ==UserScript==
-// @name         Tribal Wars Market Extensions (DE244 tuned)
+// @name         Tribal Wars Market Extensions (DE tuned, pagination + affordability)
 // @namespace    https://github.com/Themegaindex/Die-St-mme-Marktplatz-testscript
-// @version      1.2.0
-// @description  Navigation other_offer, robuster Angebotsparser (Erhalte/Für), Reisezeit-Filter, direktes Annehmen (ohne Confirm) und Batch-Trading
+// @version      1.3.0
+// @description  Robuster Angebotsparser (Erhalte/Für), Filter (bezahlbar, Händler, Dauer), Pagination-Scan und Multi-Akzept pro Angebot. Minimale Klicks.
 // @author       Themegaindex
 // @match        *://*.die-staemme.de/*
-// @match        *://*.tribalwars.net/*
-// @match        *://*.tribalwars.com.pt/*
-// @match        *://*.tribalwars.com.br/*
-// @match        *://*.triburile.ro/*
-// @match        *://*.voyna-plemyon.ru/*
-// @match        *://*.fyletikesmaxes.gr/*
-// @match        *://*.tribalwars.nl/*
-// @match        *://*.tribalwars.no.com/*
-// @match        *://*.divoke-kmeny.cz/*
-// @match        *://*.tribalwars.dk/*
-// @match        *://*.klanhaboru.hu/*
-// @match        *://*.tribals.it/*
-// @match        *://*.tribalwars.se/*
-// @match        *://*.triburi.ro/*
-// @match        *://*.plemena.net/*
-// @match        *://*.tribalwars.ae/*
-// @match        *://*.tribalwars.works/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -29,28 +12,20 @@
 (function () {
   'use strict';
 
-  // ----- Logging an Bot-UI anbinden -----
-  function log(message) {
-    if (typeof window !== 'undefined' && typeof window.twMarketBotLog === 'function') {
-      window.twMarketBotLog(message);
-    } else { console.log('[TW Market Ext]', message); }
-  }
-  function logError(message, error) {
-    if (typeof window !== 'undefined' && typeof window.twMarketBotLogError === 'function') {
-      window.twMarketBotLogError(message, error);
-    } else { console.error('[TW Market Ext] ' + message, error); }
-  }
+  // ---- Logging an Bot-UI anbinden ----
+  function log(msg){ if (window.twMarketBotLog) window.twMarketBotLog(msg); else console.log('[TW Market Ext]', msg); }
+  function logError(m,e){ if (window.twMarketBotLogError) window.twMarketBotLogError(m,e); else console.error('[TW Market Ext] '+m,e); }
 
-  // ----- Helpers -----
+  // ---- Helpers ----
   const isMarketPage = () => location.href.includes('screen=market');
   function getCurrentMarketTab() {
-    const url = location.href;
-    if (url.includes('mode=own_offer'))     return 'own_offer';
-    if (url.includes('mode=all_own_offer')) return 'all_own_offer';
-    if (url.includes('mode=other_offer'))   return 'other_offer';     // <— DE
-    if (url.includes('mode=send'))          return 'send';
-    if (url.includes('mode=transports'))    return 'transports';
-    if (url.includes('mode=traders'))       return 'traders';
+    const u = location.href;
+    if (u.includes('mode=own_offer'))     return 'own_offer';
+    if (u.includes('mode=all_own_offer')) return 'all_own_offer';
+    if (u.includes('mode=other_offer'))   return 'other_offer';
+    if (u.includes('mode=send'))          return 'send';
+    if (u.includes('mode=transports'))    return 'transports';
+    if (u.includes('mode=traders'))       return 'traders';
     return 'overview';
   }
   const isMarketOffersPage = () => isMarketPage() && getCurrentMarketTab() === 'other_offer';
@@ -60,131 +35,100 @@
     const base = Math.floor(Math.random() * (max - min + 1) + min);
     return new Promise(r => setTimeout(r, Math.floor(base * variance)));
   }
-
-  async function simulateClick(el) {
-    try {
-      if (!el) { logError('Cannot click null element', new Error('Invalid element')); return false; }
-      const rect = el.getBoundingClientRect();
-      const x = rect.left + rect.width / 2 + (Math.random() - .5) * (rect.width * .6);
-      const y = rect.top  + rect.height/ 2 + (Math.random() - .5) * (rect.height* .6);
-      el.dispatchEvent(new MouseEvent('mousemove', { bubbles:true, clientX:x, clientY:y }));
+  async function simulateClick(el){
+    try{
+      if(!el){ logError('Cannot click null element', new Error('Invalid element')); return false; }
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width/2 + (Math.random()-.5)*(r.width*.6);
+      const y = r.top  + r.height/2 + (Math.random()-.5)*(r.height*.6);
+      el.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:x,clientY:y}));
       await randomWait(50,150);
-      el.dispatchEvent(new MouseEvent('mousedown', { bubbles:true, clientX:x, clientY:y, button:0 }));
+      el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,clientX:x,clientY:y,button:0}));
       await randomWait(30,100);
-      el.dispatchEvent(new MouseEvent('mouseup',   { bubbles:true, clientX:x, clientY:y, button:0 }));
-      el.dispatchEvent(new MouseEvent('click',     { bubbles:true, clientX:x, clientY:y, button:0 }));
+      el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,clientX:x,clientY:y,button:0}));
+      el.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:x,clientY:y,button:0}));
       return true;
-    } catch (e) { logError('Error simulating click', e); return false; }
+    }catch(e){ logError('Error simulating click',e); return false; }
   }
-  async function simulateTyping(el, text) {
-    try {
-      if (!el) { logError('Cannot type in null element', new Error('Invalid element')); return false; }
+  async function simulateTyping(el, text){
+    try{
+      if(!el){ logError('Cannot type in null element', new Error('Invalid element')); return false; }
       el.focus(); await randomWait(80,200); el.value = '';
-      for (const ch of String(text)) {
-        el.value += ch;
-        el.dispatchEvent(new Event('input', { bubbles:true }));
-        await randomWait(30,120);
-      }
-      el.dispatchEvent(new Event('change', { bubbles:true }));
-      el.blur(); return true;
-    } catch (e) { logError('Error simulating typing', e); return false; }
+      for(const ch of String(text)){ el.value += ch; el.dispatchEvent(new Event('input',{bubbles:true})); await randomWait(30,120); }
+      el.dispatchEvent(new Event('change',{bubbles:true})); el.blur(); return true;
+    }catch(e){ logError('Error simulating typing',e); return false; }
   }
-  const simulateEvent = (el, type) => { try { el?.dispatchEvent(new Event(type, { bubbles:true })); return true; } catch(e){ logError('simulateEvent '+type, e); return false; } };
+  const simulateEvent = (el,type)=>{ try{ el?.dispatchEvent(new Event(type,{bubbles:true})); return true; }catch(e){ logError('simulateEvent '+type,e); return false; } };
 
-  // ----- Navigation -----
-  async function navigateToMarketTab(tab) {
-    try {
-      if (!isMarketPage()) {
-        const marketBuilding = document.querySelector('#buildings .market a');
-        const menuLink = document.querySelector('a[href*="screen=market"]');
-        const link = marketBuilding || menuLink;
-        if (!link) { logError('Cannot find market navigation element', new Error('Navigation element not found')); return false; }
-        await simulateClick(link); await randomWait(900, 1500);
+  // ---- Navigation ----
+  async function navigateToMarketTab(tab){
+    try{
+      if(!isMarketPage()){
+        const a = document.querySelector('#buildings .market a') || document.querySelector('a[href*="screen=market"]');
+        if(!a){ logError('Cannot find market navigation element', new Error('Navigation element not found')); return false; }
+        await simulateClick(a); await randomWait(900,1500);
       }
-      if (getCurrentMarketTab() === tab) return true;
-
-      // robust: entweder modemenu oder direkte Links
-      const tabLink = document.querySelector(`a[href*="mode=${tab}"]`) ||
-                      document.querySelector(`#id_${tab.replace('_','-')} a`);
-      if (tabLink) { await simulateClick(tabLink); await randomWait(700, 1200); return true; }
-
+      if(getCurrentMarketTab() === tab) return true;
+      const tabLink = document.querySelector(`a[href*="mode=${tab}"]`);
+      if(tabLink){ await simulateClick(tabLink); await randomWait(700,1200); return true; }
       logError('Cannot find tab: '+tab, new Error('Tab not found'));
       return false;
-    } catch (e) { logError('Error navigating to tab '+tab, e); return false; }
+    }catch(e){ logError('Error navigating to tab '+tab, e); return false; }
   }
 
-  // ----- Angebotstabelle finden & parsen -----
-  function findOffersTable() {
+  // ---- Angebotstabelle finden & parsen ----
+  function findOffersTable(){
     const tables = Array.from(document.querySelectorAll('table.vis'));
-    for (const tbl of tables) {
+    for(const tbl of tables){
       const firstRow = tbl.querySelector('tr');
-      if (!firstRow) continue;
+      if(!firstRow) continue;
       const headerText = firstRow.innerText.toLowerCase();
-      if (headerText.includes('erhalte') && headerText.includes('für') &&
-          headerText.includes('verhältnis') && headerText.includes('annehmen')) {
-        return tbl;
-      }
+      if(headerText.includes('erhalte') && headerText.includes('für') &&
+         headerText.includes('verhältnis') && headerText.includes('annehmen')) return tbl;
     }
     return null;
   }
-  function parseTimeToMinutes(txt) {
-    if (!txt) return 0;
-    const p = txt.trim().split(':').map(n => parseInt(n,10) || 0);
-    if (p.length === 3) return p[0]*60 + p[1] + p[2]/60;
-    if (p.length === 2) return p[0]*60 + p[1];
+  function parseTimeToMinutes(txt){
+    if(!txt) return 0;
+    const p = txt.trim().split(':').map(n=>parseInt(n,10)||0);
+    if(p.length===3) return p[0]*60 + p[1] + p[2]/60;
+    if(p.length===2) return p[0]*60 + p[1];
     return 0;
   }
-
-  function extractDetailedMarketOffers() {
-    try {
-      if (!isMarketOffersPage()) { log('Not on market offers page'); return []; }
+  function extractDetailedMarketOffers(){
+    try{
+      if(!isMarketOffersPage()) return [];
       const table = findOffersTable();
-      if (!table) return [];
-
+      if(!table) return [];
       const offers = [];
-      const rows = Array.from(table.querySelectorAll('tr')).slice(1); // skip header
+      const rows = Array.from(table.querySelectorAll('tr')).slice(1);
 
-      const resFrom = (c) => {
-        if (!c) return '';
-        if (c.querySelector('.wood'))  return 'wood';
-        if (c.querySelector('.stone')) return 'stone';
-        if (c.querySelector('.iron'))  return 'iron';
-        return '';
-      };
-      const numFrom = (c) => parseInt((c?.textContent || '').replace(/\D/g,''), 10) || 0;
+      const resFrom = (c)=> c?.querySelector('.wood') ? 'wood' : c?.querySelector('.stone') ? 'stone' : c?.querySelector('.iron') ? 'iron' : '';
+      const numFrom = (c)=> parseInt((c?.textContent || '').replace(/\D/g,''),10) || 0;
 
-      rows.forEach(row => {
+      rows.forEach(row=>{
         const cells = row.querySelectorAll('td');
-        if (cells.length < 6) return;
+        if(cells.length < 6) return;
 
-        const sellCell = cells[0];  // Erhalte
-        const buyCell  = cells[1];  // Für
-        const timeCell = cells[3];
-        const ratioCell = cells[4];
-        const availCell = cells[5];
-        const actionCell = cells[6] || cells[cells.length - 1];
+        const sellCell=cells[0], buyCell=cells[1], timeCell=cells[3], ratioCell=cells[4], availCell=cells[5];
+        const actionCell = cells[6] || cells[cells.length-1];
 
         const sellResource = resFrom(sellCell);
         const buyResource  = resFrom(buyCell);
         const sellAmount   = numFrom(sellCell);
         const buyAmount    = numFrom(buyCell);
-        if (!sellResource || !buyResource || sellAmount <= 0 || buyAmount <= 0) return;
+        if(!sellResource || !buyResource || sellAmount<=0 || buyAmount<=0) return;
 
-        let ratio = buyAmount / sellAmount;
+        let ratio = buyAmount/sellAmount;
         const rTxt = (ratioCell?.textContent || '').replace(',', '.');
         const rMatch = rTxt.match(/(\d+(?:\.\d+)?)/);
-        if (rMatch) ratio = parseFloat(rMatch[1]);
+        if(rMatch) ratio = parseFloat(rMatch[1]);
 
-        const availability = (() => {
-          const m = (availCell?.textContent || '').match(/(\d+)/);
-          return m ? parseInt(m[1], 10) : 1;
-        })();
-
+        const avail = (()=>{ const m=(availCell?.textContent||'').match(/(\d+)/); return m?parseInt(m[1],10):1; })();
         const form = actionCell ? actionCell.querySelector('form.market_accept_offer') : null;
-        const submitBtn = form ? form.querySelector('input[type="submit"],button[type="submit"]') : null;
         const idInput = form ? form.querySelector('input[name="id"]') : null;
 
-        const carry = (window?.twMarketBotConfig?.merchantMaxTransport) || 1000;
+        const carry = (window.twMarketBotConfig?.merchantMaxTransport) || 1000;
         const merchantsRequired = Math.max(1, Math.ceil(buyAmount / carry));
 
         offers.push({
@@ -194,10 +138,9 @@
           ratio,
           travelTime: timeCell ? timeCell.textContent.trim() : '',
           travelMinutes: parseTimeToMinutes(timeCell ? timeCell.textContent : ''),
-          availability,
+          availability: avail,
           merchantsRequired,
           canAccept: !!form,
-          actionButton: submitBtn,
           acceptForm: form,
           timestamp: Date.now()
         });
@@ -205,208 +148,209 @@
 
       log(`Extracted ${offers.length} detailed market offers`);
       return offers;
-    } catch (e) { logError('Error extracting detailed market offers', e); return []; }
+    }catch(e){ logError('Error extracting detailed market offers', e); return []; }
   }
 
-  // ----- Angebotsauswahl -----
-  function findBestMarketOffers(offers, criteria) {
-    try {
-      if (!offers || !offers.length) return [];
+  // ---- Pagination-Helpers ----
+  function getPaginationContainer(){
+    const tds = Array.from(document.querySelectorAll('td[align="center"]'));
+    return tds.find(td => td.querySelector('a.paged-nav-item') || td.querySelector('strong')) || null;
+  }
+  function getCurrentPageNumber(){
+    const cont = getPaginationContainer();
+    if(!cont) return 1;
+    const strong = cont.querySelector('strong');
+    if(!strong) return 1;
+    const m = strong.textContent.match(/(\d+)/);
+    return m ? parseInt(m[1],10) : 1;
+  }
+  function findNextPageLink(){
+    const cont = getPaginationContainer();
+    if(!cont) return null;
+    const cur = getCurrentPageNumber();
+    const links = Array.from(cont.querySelectorAll('a.paged-nav-item'));
+    let next = null;
+    for(const a of links){
+      const m = a.textContent.match(/(\d+)/);
+      if(!m) continue;
+      const n = parseInt(m[1],10);
+      if(n === cur+1){ next = a; break; }
+    }
+    return next || null;
+  }
 
-      const def = {
-        action: 'buy',                 // 'buy' oder 'sell'
-        resource: 'wood',
-        buyResource: null,             // optionaler Gegentyp
-        minAmount: 0,
-        maxAmount: 1e9,
-        minRatio: 0,
-        maxRatio: Infinity,
-        maxMerchants: 10,
-        maxTravelMinutes: 24*60,
-        requireAcceptable: true,       // nur wenn form vorhanden
-        prioritizeBy: 'ratio'
-      };
-      const c = { ...def, ...criteria };
+  // ---- Angebotsauswahl (mit Bezahlbarkeit/Händler/Dauer) ----
+  function findBestMarketOffers(offers, criteria){
+    try{
+      if(!offers?.length) return [];
+      const v = window.twMarketBotVillage || { resources:{wood:0,stone:0,iron:0}, merchantsAvailable:0 };
+      const c = Object.assign({
+        action:'buy',
+        resource:'wood',
+        minAmount:0,
+        maxAmount:1e9,
+        minRatio:0,
+        maxRatio:Infinity,
+        maxMerchants:10,
+        maxTravelMinutes:24*60,
+        requireAcceptable:true,
+        prioritizeBy:'ratio'
+      }, criteria || {});
 
-      let filtered = offers.filter(o => {
-        if (!o) return false;
-        if (c.requireAcceptable && !o.canAccept) return false;
-        if (o.travelMinutes > c.maxTravelMinutes) return false;
+      let filtered = offers.filter(o=>{
+        if(!o) return false;
+        if(c.requireAcceptable && !o.acceptForm) return false;
+        if(o.travelMinutes > c.maxTravelMinutes) return false;
+        if(o.merchantsRequired > Math.min(c.maxMerchants, v.merchantsAvailable)) return false;
 
-        if (c.action === 'buy') {
-          // Wir wollen c.resource bekommen -> Verkäufer verkauft diese Ressource (sellResource)
-          if (o.sellResource !== c.resource) return false;
-          if (o.sellAmount < c.minAmount || o.sellAmount > c.maxAmount) return false;
-          if (o.merchantsRequired > c.maxMerchants) return false;
-          if (o.ratio > c.maxRatio) return false;                  // günstig einkaufen
-          if (o.ratio < c.minRatio) return false;
+        if(c.action === 'buy'){
+          // wir wollen c.resource erhalten → Verkäufer verkauft diese Ressource
+          if(o.sellResource !== c.resource) return false;
+          if(o.sellAmount < c.minAmount || o.sellAmount > c.maxAmount) return false;
+          if(o.ratio < c.minRatio || o.ratio > c.maxRatio) return false;
+          // bezahlbar?
+          if(v.resources[o.buyResource] < o.buyAmount) return false;
           return true;
-        } else {
-          // Wir wollen c.resource verkaufen -> Käufer bietet „Für“ diese Ressource (buyResource)
-          if (o.buyResource !== c.resource) return false;
-          if (o.buyAmount < c.minAmount || o.buyAmount > c.maxAmount) return false;
-          if (o.merchantsRequired > c.maxMerchants) return false;
-          if (o.ratio < c.minRatio) return false;                  // profitabel verkaufen
-          if (o.ratio > c.maxRatio) return false;
+        }else{
+          // wir wollen c.resource abgeben → Käufer verlangt diese Ressource als "Für"
+          if(o.buyResource !== c.resource) return false;
+          if(o.buyAmount < c.minAmount || o.buyAmount > c.maxAmount) return false;
+          if(o.ratio < c.minRatio || o.ratio > c.maxRatio) return false;
+          if(v.resources[o.buyResource] < o.buyAmount) return false;
           return true;
         }
       });
 
-      if (c.prioritizeBy === 'ratio') filtered.sort((a,b) => c.action === 'buy' ? (a.ratio - b.ratio) : (b.ratio - a.ratio));
-      else if (c.prioritizeBy === 'time') filtered.sort((a,b) => a.travelMinutes - b.travelMinutes);
-      else if (c.prioritizeBy === 'amount') filtered.sort((a,b) => c.action === 'buy' ? (b.sellAmount - a.sellAmount) : (b.buyAmount - a.buyAmount));
+      if(c.prioritizeBy === 'ratio'){
+        filtered.sort((a,b)=> c.action==='buy' ? (a.ratio - b.ratio) : (b.ratio - a.ratio));
+      }else if(c.prioritizeBy === 'time'){
+        filtered.sort((a,b)=> a.travelMinutes - b.travelMinutes);
+      }else if(c.prioritizeBy === 'amount'){
+        filtered.sort((a,b)=> c.action==='buy' ? (b.sellAmount - a.sellAmount) : (b.buyAmount - a.buyAmount));
+      }
 
       log(`Found ${filtered.length} offers matching criteria`);
       return filtered;
-    } catch (e) { logError('Error finding best offers', e); return []; }
+    }catch(e){ logError('Error finding best offers',e); return []; }
   }
 
-  // ----- Akzeptieren (direkt, ohne separate Confirm-Seite) -----
-  async function acceptMarketOffer(offer) {
-    try {
-      if (!offer || !offer.acceptForm) {
-        logError('Cannot accept: invalid offer / no form', new Error('Invalid offer'));
-        return false;
+  // ---- Pagination-Scan (sucht nächste Seiten) ----
+  async function searchOffersWithPagination(criteria, pagesToScan = 2){
+    try{
+      if(pagesToScan <= 0) return [];
+      let filtered = findBestMarketOffers(extractDetailedMarketOffers(), criteria);
+      if(filtered.length) return filtered;
+
+      for(let i=0;i<pagesToScan;i++){
+        const next = findNextPageLink();
+        if(!next) break;
+        await simulateClick(next);
+        await randomWait(800,1400);
+        const pageOffers = extractDetailedMarketOffers();
+        filtered = findBestMarketOffers(pageOffers, criteria);
+        if(filtered.length) return filtered;
       }
-
-      // Count (wie viele identische Offers) – hier konservativ 1
-      const countInput = offer.acceptForm.querySelector('input[name="count"]');
-      if (countInput) { await simulateTyping(countInput, '1'); }
-
-      // Absenden
-      const submit = offer.acceptForm.querySelector('input[type="submit"],button[type="submit"]');
-      if (!submit) { logError('Submit-Button nicht gefunden', new Error('No submit')); return false; }
-      await simulateClick(submit);
-
-      // Seite lädt / Ajax-Reload
-      await randomWait(900, 1600);
-      log('Offer submitted');
-      return true;
-    } catch (e) { logError('Error accepting offer', e); return false; }
+      return [];
+    }catch(e){ logError('Error in pagination scan', e); return []; }
   }
 
-  async function createMarketOffer(details) {
-    try {
-      const d = { sellResource:'wood', sellAmount:1000, buyResource:'stone', buyAmount:1000, maxTime:5, ...details };
-      const ok = await navigateToMarketTab('own_offer');
-      if (!ok) return false;
-      await randomWait(700, 1200);
+  // ---- Akzeptieren (Multi-Count) ----
+  async function acceptMarketOffer(offer, opts={}){
+    try{
+      if(!offer?.acceptForm){ logError('Cannot accept: no form', new Error('Invalid offer')); return false; }
+      const v = window.twMarketBotVillage || { resources:{wood:0,stone:0,iron:0}, merchantsAvailable:0 };
 
-      // Formular laut deinem Snippet: Radio + Input
+      // Maximal wie viele identische Offerten können wir akzeptieren?
+      const payRes = offer.buyResource;
+      const maxByRes = Math.floor((v.resources[payRes] || 0) / offer.buyAmount);
+      const maxByMer = Math.floor((v.merchantsAvailable || 0) / offer.merchantsRequired);
+      let count = Math.max(1, Math.min(offer.availability || 1, maxByRes, maxByMer));
+      if(typeof opts.maxCount === 'number') count = Math.max(1, Math.min(count, opts.maxCount));
+
+      // Wenn gar nicht bezahlbar → abbrechen
+      if(count <= 0){ log('Offer not affordable'); return false; }
+
+      // Count setzen
+      const countInput = offer.acceptForm.querySelector('input[name="count"]');
+      if(countInput) await simulateTyping(countInput, String(count));
+
+      // Submit
+      const submit = offer.acceptForm.querySelector('input[type="submit"],button[type="submit"]');
+      if(!submit){ logError('Submit-Button nicht gefunden', new Error('No submit')); return false; }
+      await randomWait(200,400);
+      await simulateClick(submit);
+      await randomWait(900,1600);
+
+      // Lokalen State vorsichtig updaten (optimistisch)
+      v.merchantsAvailable = Math.max(0, (v.merchantsAvailable||0) - count*offer.merchantsRequired);
+      v.resources[payRes]  = Math.max(0, (v.resources[payRes]||0) - count*offer.buyAmount);
+      window.twMarketBotVillage = v;
+
+      log(`Offer accepted (x${count})`);
+      return true;
+    }catch(e){ logError('Error accepting offer', e); return false; }
+  }
+
+  async function createMarketOffer(details){
+    try{
+      const d = Object.assign({ sellResource:'wood', sellAmount:1000, buyResource:'stone', buyAmount:1000, maxTime:5 }, details || {});
+      const ok = await navigateToMarketTab('own_offer');
+      if(!ok) return false;
+      await randomWait(700,1200);
+
       const sellRadio = document.querySelector(`#res_sell_${d.sellResource}`);
       const sellInput = document.querySelector('#res_sell_amount');
       const buyRadio  = document.querySelector(`#res_buy_${d.buyResource}`);
       const buyInput  = document.querySelector('#res_buy_amount');
+      if(!sellRadio || !sellInput || !buyRadio || !buyInput){ logError('Create-offer form elements missing', new Error('Form missing')); return false; }
 
-      if (!sellRadio || !sellInput || !buyRadio || !buyInput) {
-        logError('Create-offer form elements missing', new Error('Form missing'));
-        return false;
-      }
-
-      sellRadio.checked = true; await simulateEvent(sellRadio, 'change');
-      await simulateTyping(sellInput, String(d.sellAmount));
-      buyRadio.checked = true;  await simulateEvent(buyRadio, 'change');
-      await simulateTyping(buyInput,  String(d.buyAmount));
-
+      sellRadio.checked=true; simulateEvent(sellRadio,'change'); await simulateTyping(sellInput,String(d.sellAmount));
+      buyRadio.checked=true;  simulateEvent(buyRadio,'change');  await simulateTyping(buyInput,String(d.buyAmount));
       const maxTime = document.querySelector('input[name="max_time"]');
-      if (maxTime) await simulateTyping(maxTime, String(d.maxTime));
+      if(maxTime) await simulateTyping(maxTime, String(d.maxTime));
 
       const submit = document.querySelector('#submit_offer');
-      if (!submit) { logError('Create submit not found', new Error('No submit')); return false; }
-      await randomWait(900, 1600);
+      if(!submit){ logError('Create submit not found', new Error('No submit')); return false; }
+      await randomWait(900,1600);
       await simulateClick(submit);
-      await randomWait(900, 1600);
-
+      await randomWait(900,1600);
       log('Offer created successfully');
       return true;
-    } catch (e) { logError('Error creating offer', e); return false; }
+    }catch(e){ logError('Error creating market offer', e); return false; }
   }
 
-  async function executeBatchTrades(offers, maxTrades = 3) {
-    try {
-      if (!offers || !offers.length) return 0;
+  async function executeBatchTrades(offers, maxTrades = 1){
+    try{
+      if(!offers?.length) return 0;
       const list = offers.slice(0, maxTrades);
       log(`Executing batch of ${list.length} trades`);
-
       let ok = 0;
-      for (let i = 0; i < list.length; i++) {
-        const success = await acceptMarketOffer(list[i]);
-        if (success) {
-          ok++; log(`Batch trade ${i+1}/${list.length} successful`);
-          if (i < list.length - 1) await randomWait(1200, 2500);
-        } else {
-          log(`Batch trade ${i+1}/${list.length} failed`);
-          await randomWait(2500, 4000);
-        }
-        if (i < list.length - 1) { await navigateToMarketTab('other_offer'); await randomWait(700, 1200); }
+      for(let i=0;i<list.length;i++){
+        const success = await acceptMarketOffer(list[i], { maxCount: 2 }); // max 2 identische Offerten pro Klick
+        if(success){ ok++; log(`Batch trade ${i+1}/${list.length} successful`); await randomWait(1000,2200); }
+        else{ log(`Batch trade ${i+1}/${list.length} failed`); await randomWait(2200,4000); }
+        if(i < list.length-1){ await navigateToMarketTab('other_offer'); await randomWait(600,1100); }
       }
       log(`Batch trading completed: ${ok}/${list.length} successful`);
       return ok;
-    } catch (e) { logError('Error batch trading', e); return 0; }
+    }catch(e){ logError('Error batch trading', e); return 0; }
   }
 
-  // ---- (optional) kleine Anti-Detection‑Bewegungen ----
-  async function simulateRandomMouseMovements(duration = 2000) {
-    try {
-      const end = Date.now() + duration;
-      let x = Math.random()*innerWidth, y = Math.random()*innerHeight;
-      while (Date.now() < end) {
-        const tx = innerWidth * (0.1 + Math.random()*0.8);
-        const ty = innerHeight* (0.15+ Math.random()*0.7);
-        const steps = Math.max(5, Math.min(20, Math.floor(Math.hypot(tx-x, ty-y)/10)));
-        for (let i=0;i<steps && Date.now()<end;i++) {
-          x = x + (tx-x)/(steps-i) + (Math.random()-0.5)*5;
-          y = y + (ty-y)/(steps-i) + (Math.random()-0.5)*5;
-          window.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:x,clientY:y}));
-          await randomWait(10,50);
-        }
-        await randomWait(300,900);
-      }
-      return true;
-    } catch (e) { logError('Mouse movements error', e); return false; }
-  }
-  async function simulateRandomScrolling(duration = 3000) {
-    try {
-      const end = Date.now() + duration;
-      let pos = scrollY;
-      const max = Math.max(0, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)-innerHeight);
-      while (Date.now() < end) {
-        const target = Math.random()*max*0.8;
-        const steps = Math.max(5, Math.min(15, Math.floor(Math.abs(target-pos)/120)));
-        for (let i=0;i<steps && Date.now()<end;i++) {
-          pos = pos + (target-pos)/(steps-i) + (Math.random()-0.5)*10;
-          scrollTo({ top: pos });
-          await randomWait(50,150);
-        }
-        await randomWait(400,1200);
-      }
-      return true;
-    } catch (e) { logError('Scrolling error', e); return false; }
-  }
-
-  // ----- Export -----
+  // Export
   window.twMarketExtensions = {
-    // Navigation
     navigateToMarketTab,
     getCurrentMarketTab,
     isMarketPage,
     isMarketOffersPage,
-
-    // Daten
     extractDetailedMarketOffers,
     findBestMarketOffers,
-
-    // Trades
+    searchOffersWithPagination,
     acceptMarketOffer,
     createMarketOffer,
     executeBatchTrades,
-
-    // Anti-Detection
     simulateClick,
     simulateTyping,
     simulateEvent,
-    randomWait,
-    simulateRandomMouseMovements,
-    simulateRandomScrolling
+    randomWait
   };
 })();
